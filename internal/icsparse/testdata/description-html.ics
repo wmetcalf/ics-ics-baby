@@ -1,0 +1,17 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//ics-ics-baby test//EN
+BEGIN:VEVENT
+UID:ev-html@ics-ics-baby
+DTSTART:20250101T120000Z
+SUMMARY:HTML in Description
+DESCRIPTION:<div><p>Welcome <strong>Friend</strong></p><p><a href="javascript:alert('x')">Bad Link</a><br /><a href="https://example.com">Good Link</a></p><script>alert('nope')</script></div>
+END:VEVENT
+BEGIN:VEVENT
+UID:ev-alt@ics-ics-baby
+DTSTART:20250102T120000Z
+SUMMARY:Alternate HTML
+DESCRIPTION:Plain fallback line
+X-ALT-DESC;FMTTYPE=text/html:<p>Call us at <a href="tel:+18005551234">+1-800-555-1234</a></p><p><span style="color:red">Styled</span></p>
+END:VEVENT
+END:VCALENDAR
