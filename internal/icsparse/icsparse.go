@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/base64"
+	"fmt"
 	htmlstd "html"
 	"net/url"
 	"os"
@@ -247,12 +248,33 @@ func (c *CalendarInfo) FilterRange(start, end *time.Time) {
 	c.Events = evs
 }
 
-func ParseICSFile(path string, defaultTZ string) (*CalendarInfo, error) {
+const (
+	maxEvents      = 10000 // Maximum number of events per calendar
+	maxTodos       = 10000 // Maximum number of todos
+	maxAttachments = 1000  // Maximum attachments per event/todo
+	maxAttendees   = 10000 // Maximum attendees per event/todo
+	maxVCards      = 1000  // Maximum vcards per event/todo
+	maxAlarms      = 100   // Maximum alarms per event/todo
+)
+
+func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo, error) {
+	// Check file size before reading to prevent memory exhaustion
+	stat, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if maxBytes > 0 && stat.Size() > maxBytes {
+		return nil, fmt.Errorf("ICS file too large: %d bytes (max %d)", stat.Size(), maxBytes)
+	}
+
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	lines := unfoldLines(bytes.NewReader(b))
+	lines, err := unfoldLines(bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
 
 	var cal CalendarInfo
 	var inEvent bool
@@ -323,6 +345,9 @@ func ParseICSFile(path string, defaultTZ string) (*CalendarInfo, error) {
 					ev.Status = ptr(cleaned)
 				}
 			}
+			if len(cal.Events) >= maxEvents {
+				return nil, fmt.Errorf("too many events in calendar (max %d)", maxEvents)
+			}
 			cal.Events = append(cal.Events, ev)
 			inEvent = false
 			continue
@@ -374,6 +399,9 @@ func ParseICSFile(path string, defaultTZ string) (*CalendarInfo, error) {
 					todo.Status = ptr(cleaned)
 				}
 			}
+			if len(cal.Todos) >= maxTodos {
+				return nil, fmt.Errorf("too many todos in calendar (max %d)", maxTodos)
+			}
 			cal.Todos = append(cal.Todos, todo)
 			inTodo = false
 			continue
@@ -400,8 +428,14 @@ func ParseICSFile(path string, defaultTZ string) (*CalendarInfo, error) {
 		if strings.HasPrefix(upper, "BEGIN:VALARM") {
 			alarm, endIdx := parseValarm(lines, i, locDefault)
 			if inEvent {
+				if len(ev.Alarms) >= maxAlarms {
+					return nil, fmt.Errorf("too many alarms in event (max %d)", maxAlarms)
+				}
 				ev.Alarms = append(ev.Alarms, alarm)
 			} else if inTodo {
+				if len(todo.Alarms) >= maxAlarms {
+					return nil, fmt.Errorf("too many alarms in todo (max %d)", maxAlarms)
+				}
 				todo.Alarms = append(todo.Alarms, alarm)
 			}
 			i = endIdx
@@ -411,12 +445,24 @@ func ParseICSFile(path string, defaultTZ string) (*CalendarInfo, error) {
 		if strings.HasPrefix(upper, "BEGIN:VCARD") {
 			card, endIdx := parseVCardBlock(lines, i)
 			if inEvent {
+				if len(ev.VCards) >= maxVCards {
+					return nil, fmt.Errorf("too many vcards in event (max %d)", maxVCards)
+				}
 				ev.VCards = append(ev.VCards, card)
 			} else if inTodo {
+				if len(todo.VCards) >= maxVCards {
+					return nil, fmt.Errorf("too many vcards in todo (max %d)", maxVCards)
+				}
 				todo.VCards = append(todo.VCards, card)
 			} else if inFreebusy {
+				if len(fb.VCards) >= maxVCards {
+					return nil, fmt.Errorf("too many vcards in freebusy (max %d)", maxVCards)
+				}
 				fb.VCards = append(fb.VCards, card)
 			} else {
+				if len(cal.VCards) >= maxVCards {
+					return nil, fmt.Errorf("too many vcards in calendar (max %d)", maxVCards)
+				}
 				cal.VCards = append(cal.VCards, card)
 			}
 			i = endIdx
@@ -584,9 +630,15 @@ func ParseICSFile(path string, defaultTZ string) (*CalendarInfo, error) {
 					rec.Duration = ptr(value)
 				}
 			case "ATTACH":
+				if len(ev.Attachments) >= maxAttachments {
+					return nil, fmt.Errorf("too many attachments in event (max %d)", maxAttachments)
+				}
 				att := parseAttach(value, params)
 				ev.Attachments = append(ev.Attachments, att)
 			case "ATTENDEE":
+				if len(ev.Attendees) >= maxAttendees {
+					return nil, fmt.Errorf("too many attendees in event (max %d)", maxAttendees)
+				}
 				ev.Attendees = append(ev.Attendees, parseAttendee(value, params))
 			default:
 				if value != "" {
@@ -698,9 +750,15 @@ func ParseICSFile(path string, defaultTZ string) (*CalendarInfo, error) {
 					rec.Duration = ptr(value)
 				}
 			case "ATTACH":
+				if len(todo.Attachments) >= maxAttachments {
+					return nil, fmt.Errorf("too many attachments in todo (max %d)", maxAttachments)
+				}
 				att := parseAttach(value, params)
 				todo.Attachments = append(todo.Attachments, att)
 			case "ATTENDEE":
+				if len(todo.Attendees) >= maxAttendees {
+					return nil, fmt.Errorf("too many attendees in todo (max %d)", maxAttendees)
+				}
 				todo.Attendees = append(todo.Attendees, parseAttendee(value, params))
 			default:
 				if value != "" {
@@ -782,29 +840,59 @@ func lt(a, b EventInfo) bool {
 	return a.DTStart.Before(*b.DTStart)
 }
 
-func unfoldLines(r *bytes.Reader) []string {
+const (
+	maxFoldedLineLength       = 10 * 1024 * 1024  // 10MB max per logical line (normal properties)
+	maxAttachPropertyLength   = 150 * 1024 * 1024 // 150MB max for ATTACH properties (allows 100MB base64 + overhead)
+)
+
+func unfoldLines(r *bytes.Reader) ([]string, error) {
 	s := bufio.NewScanner(r)
 	s.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
 	var res []string
-	var cur string
+	var cur strings.Builder
+	var isAttachProperty bool
+
 	for s.Scan() {
 		line := s.Text()
 		if len(line) > 0 && line[len(line)-1] == '\r' {
 			line = line[:len(line)-1]
 		}
 		if len(line) > 0 && (line[0] == ' ' || line[0] == '\t') {
-			cur += strings.TrimLeft(line, " \t")
+			trimmed := strings.TrimLeft(line, " \t")
+			// Use larger limit for ATTACH properties to handle inline base64 attachments
+			limit := maxFoldedLineLength
+			if isAttachProperty {
+				limit = maxAttachPropertyLength
+			}
+			// Check folded line length limit to prevent memory exhaustion
+			if cur.Len()+len(trimmed) > limit {
+				return nil, fmt.Errorf("folded line exceeds maximum length of %d bytes", limit)
+			}
+			cur.WriteString(trimmed)
 			continue
 		}
-		if cur != "" {
-			res = append(res, cur)
+		if cur.Len() > 0 {
+			res = append(res, cur.String())
+			cur.Reset()
+			isAttachProperty = false
 		}
-		cur = line
+		// Check if this is an ATTACH property
+		if strings.HasPrefix(strings.ToUpper(line), "ATTACH") {
+			isAttachProperty = true
+		}
+		limit := maxFoldedLineLength
+		if isAttachProperty {
+			limit = maxAttachPropertyLength
+		}
+		if len(line) > limit {
+			return nil, fmt.Errorf("line exceeds maximum length of %d bytes", limit)
+		}
+		cur.WriteString(line)
 	}
-	if cur != "" {
-		res = append(res, cur)
+	if cur.Len() > 0 {
+		res = append(res, cur.String())
 	}
-	return res
+	return res, nil
 }
 
 func splitProp(line string) (name string, params map[string]string, value string) {
@@ -1213,15 +1301,30 @@ func isSafeLink(raw string) bool {
 		return false
 	}
 	lower := strings.ToLower(raw)
-	if strings.HasPrefix(lower, "javascript:") {
-		return false
+
+	// Block dangerous scheme prefixes from being rendered as clickable links
+	// Note: The raw URL is still preserved in the manifest and plain text output
+	// for security analysis - we just don't make them clickable in HTML
+	dangerousSchemes := []string{
+		"javascript:",
+		"vbscript:",
+		"data:",
+		"file:",
+		"about:",
 	}
+	for _, scheme := range dangerousSchemes {
+		if strings.HasPrefix(lower, scheme) {
+			return false
+		}
+	}
+
 	parsed, err := url.Parse(raw)
 	if err != nil {
 		return false
 	}
 	if parsed.Scheme == "" {
-		return !strings.HasPrefix(lower, "data:")
+		// Scheme-less URLs - only allow if they don't look dangerous
+		return true
 	}
 	return safeURLSchemes[strings.ToLower(parsed.Scheme)]
 }

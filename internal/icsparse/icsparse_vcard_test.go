@@ -7,7 +7,7 @@ import (
 )
 
 func TestParseICSFile_WithEmbeddedVCard(t *testing.T) {
-	cal, err := ParseICSFile(filepath.Join("testdata", "event-with-vcard.ics"), "")
+	cal, err := ParseICSFile(filepath.Join("testdata", "event-with-vcard.ics"), "", 0)
 	if err != nil {
 		t.Fatalf("ParseICSFile returned error: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestParseICSFile_WithEmbeddedVCard(t *testing.T) {
 }
 
 func TestParseICSFile_TopLevelVCardBinary(t *testing.T) {
-	cal, err := ParseICSFile(filepath.Join("testdata", "top-level-vcard.ics"), "")
+	cal, err := ParseICSFile(filepath.Join("testdata", "top-level-vcard.ics"), "", 0)
 	if err != nil {
 		t.Fatalf("ParseICSFile returned error: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestParseICSFile_TopLevelVCardBinary(t *testing.T) {
 }
 
 func TestParseICSFile_WithRecurrenceAndTimezone(t *testing.T) {
-	cal, err := ParseICSFile(filepath.Join("testdata", "event-with-recurrence.ics"), "")
+	cal, err := ParseICSFile(filepath.Join("testdata", "event-with-recurrence.ics"), "", 0)
 	if err != nil {
 		t.Fatalf("ParseICSFile returned error: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestParseICSFile_WithRecurrenceAndTimezone(t *testing.T) {
 }
 
 func TestParseICSFile_TodosAndFreeBusy(t *testing.T) {
-	cal, err := ParseICSFile(filepath.Join("testdata", "todos-freebusy.ics"), "")
+	cal, err := ParseICSFile(filepath.Join("testdata", "todos-freebusy.ics"), "", 0)
 	if err != nil {
 		t.Fatalf("ParseICSFile returned error: %v", err)
 	}

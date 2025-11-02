@@ -8,7 +8,7 @@ import (
 )
 
 func TestParseICSFile_DescriptionHTML(t *testing.T) {
-	cal, err := ParseICSFile(filepath.Join("testdata", "description-html.ics"), "")
+	cal, err := ParseICSFile(filepath.Join("testdata", "description-html.ics"), "", 0)
 	if err != nil {
 		t.Fatalf("ParseICSFile returned error: %v", err)
 	}

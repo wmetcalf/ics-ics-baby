@@ -27,6 +27,8 @@ func main() {
 	var screenshot string
 	var htmlOut string
 	var download bool
+	var maxAttachBytes int64
+	var maxICSBytes int64
 	var tzDefault string
 	var startStr string
 	var endStr string
@@ -38,6 +40,8 @@ func main() {
 	flag.StringVar(&screenshot, "screenshot", "", "Output PNG path (default: OUT/preview.png)")
 	flag.StringVar(&htmlOut, "html", "", "Output HTML path (default: OUT/preview.html)")
 	flag.BoolVar(&download, "download-attachments", false, "Download URL attachments")
+	flag.Int64Var(&maxAttachBytes, "max-attachment-bytes", 100<<20, "Maximum size to allow per attachment in bytes (default 100 MiB)")
+	flag.Int64Var(&maxICSBytes, "max-ics-bytes", 500<<20, "Maximum size to allow for ICS file in bytes (default 500 MiB)")
 	flag.StringVar(&tzDefault, "timezone", "", "Default timezone for naive dates (e.g., America/Chicago)")
 	flag.StringVar(&startStr, "start", "", "Filter start date (YYYY-MM-DD) inclusive")
 	flag.StringVar(&endStr, "end", "", "Filter end date (YYYY-MM-DD) exclusive")
@@ -55,8 +59,12 @@ func main() {
 		}
 	}
 
+	if download {
+		fmt.Fprintln(os.Stderr, "warning: --download-attachments will contact remote hosts; enable only for trusted invites and networks.")
+	}
+
 	if flag.NArg() < 1 {
-		fmt.Println("Usage: ics-ics-baby <file.ics> [--out out] [--html out/preview.html] [--screenshot out/preview.png] [--view invite|agenda] [--download-attachments] [--timezone Zone] [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--style light|dark] [--width 1200]")
+		fmt.Println("Usage: ics-ics-baby <file.ics> [--out out] [--html out/preview.html] [--screenshot out/preview.png] [--view invite|agenda] [--download-attachments] [--timezone Zone] [--start YYYY-MM-DD] [--end YYYY-MM-DD] [--style light|dark] [--width 1200] [--max-ics-bytes N] [--max-attachment-bytes N]")
 		os.Exit(2)
 	}
 	icsPath := flag.Arg(0)
@@ -66,7 +74,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	cal, err := icsparse.ParseICSFile(icsPath, tzDefault)
+	cal, err := icsparse.ParseICSFile(icsPath, tzDefault, maxICSBytes)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "parse error: %v\n", err)
 		os.Exit(1)
@@ -75,17 +83,21 @@ func main() {
 	var start, end *time.Time
 	if startStr != "" {
 		t, err := time.Parse("2006-01-02", startStr)
-		if err == nil { start = &t }
+		if err == nil {
+			start = &t
+		}
 	}
 	if endStr != "" {
 		t, err := time.Parse("2006-01-02", endStr)
-		if err == nil { end = &t }
+		if err == nil {
+			end = &t
+		}
 	}
 	if start != nil || end != nil {
 		cal.FilterRange(start, end)
 	}
 
-	if err := attach.ExtractAll(cal, outDir, download); err != nil {
+	if err := attach.ExtractAll(cal, outDir, download, maxAttachBytes); err != nil {
 		fmt.Fprintf(os.Stderr, "attachment error: %v\n", err)
 	}
 
@@ -102,12 +114,16 @@ func main() {
 		fmt.Fprintf(os.Stderr, "failed to write manifest: %v\n", err)
 	}
 
-	if htmlOut == "" { htmlOut = filepath.Join(outDir, "ics-ics-baby-preview.html") }
+	if htmlOut == "" {
+		htmlOut = filepath.Join(outDir, "ics-ics-baby-preview.html")
+	}
 	if err := webview.WriteInviteHTML(cal, htmlOut, style); err != nil {
 		fmt.Fprintf(os.Stderr, "html render error: %v\n", err)
 	}
 
-	if screenshot == "" { screenshot = filepath.Join(outDir, "ics-ics-baby-preview.png") }
+	if screenshot == "" {
+		screenshot = filepath.Join(outDir, "ics-ics-baby-preview.png")
+	}
 	switch view {
 	case "invite":
 		if err := render.RenderInvitePNG(cal, screenshot, width, style); err != nil {

@@ -13,118 +13,353 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gabriel-vasile/mimetype"
 	"ics-ics-baby/internal/icsparse"
 	"ics-ics-baby/internal/util"
 )
 
-func ExtractAll(cal *icsparse.CalendarInfo, outDir string, download bool) error {
+const (
+	attachmentFilePerm        = 0o644
+	attachmentDownloadTimeout = 30 * time.Second
+	maxRedirects              = 5
+)
+
+var (
+	errAttachmentTooLarge = errors.New("attachment exceeds maximum size limit")
+	errPathTraversal      = errors.New("path traversal detected")
+)
+
+// validatePath ensures the final path is within the allowed directory
+func validatePath(path, allowedDir string) error {
+	cleanPath := filepath.Clean(path)
+	cleanDir := filepath.Clean(allowedDir)
+
+	// Make both absolute for comparison
+	absPath, err := filepath.Abs(cleanPath)
+	if err != nil {
+		return fmt.Errorf("%w: cannot resolve path", errPathTraversal)
+	}
+
+	absDir, err := filepath.Abs(cleanDir)
+	if err != nil {
+		return fmt.Errorf("%w: cannot resolve directory", errPathTraversal)
+	}
+
+	// Check if path is within directory
+	if !strings.HasPrefix(absPath, absDir+string(filepath.Separator)) {
+		return fmt.Errorf("%w: path %s is outside %s", errPathTraversal, absPath, absDir)
+	}
+
+	return nil
+}
+
+// ExtractAll saves inline attachments and optionally downloads remote ones.  Each
+// saved attachment is bounded by maxBytes; oversized or failing downloads are
+// skipped and reported via stderr while processing continues.
+func ExtractAll(cal *icsparse.CalendarInfo, outDir string, download bool, maxBytes int64) error {
 	attDir := filepath.Join(outDir, "ics-ics-baby-attachments")
 	if err := os.MkdirAll(attDir, 0o755); err != nil {
 		return err
 	}
+	if maxBytes <= 0 {
+		maxBytes = 1 << 30
+	}
+
+	var firstErr error
+
 	for i := range cal.Events {
 		ev := &cal.Events[i]
 		evSlug := util.Slugify(fmt.Sprintf("%d-%s", i+1, ev.Summary))
 		for j := range ev.Attachments {
 			a := &ev.Attachments[j]
 			base := fmt.Sprintf("%s-%d", evSlug, j+1)
+
 			switch a.Source {
 			case "inline":
-				p, n, md5s, sha, mt, err := saveInline(a.Value, attDir, base, a.Fmt)
-				if err != nil { continue }
-				rel, _ := filepath.Rel(outDir, p)
+				path, size, md5sum, sha, mt, err := saveInline(a.Value, attDir, base, a.Fmt, maxBytes)
+				if err != nil {
+					noteAttachmentError(base, err)
+					firstErr = pickFirstError(firstErr, err)
+					continue
+				}
+				rel, _ := filepath.Rel(outDir, path)
 				a.SavedAs = &rel
-				a.Size = &n
-				a.MD5 = &md5s
+				a.Size = intPtrFromInt64(size)
+				a.MD5 = &md5sum
 				a.SHA256 = &sha
 				a.Mime = &mt
 			case "url":
-				if !download { a.Href = &a.Value; break }
+				if !download {
+					a.Href = &a.Value
+					continue
+				}
 				if strings.HasPrefix(a.Value, "http://") || strings.HasPrefix(a.Value, "https://") {
-					p, n, md5s, sha, mt, err := downloadURL(a.Value, attDir, base, a.Fmt)
-					if err != nil { continue }
-					rel, _ := filepath.Rel(outDir, p)
+					path, size, md5sum, sha, mt, err := downloadURL(a.Value, attDir, base, a.Fmt, maxBytes)
+					if err != nil {
+						noteAttachmentError(a.Value, err)
+						firstErr = pickFirstError(firstErr, err)
+						continue
+					}
+					rel, _ := filepath.Rel(outDir, path)
 					a.SavedAs = &rel
-					a.Size = &n
-					a.MD5 = &md5s
+					a.Size = intPtrFromInt64(size)
+					a.MD5 = &md5sum
 					a.SHA256 = &sha
 					a.Mime = &mt
+				} else {
+					a.Href = &a.Value
 				}
+			default:
+				// Nothing to do.
 			}
 		}
 	}
-	return nil
+
+	return firstErr
 }
 
-func saveInline(b64 string, attDir, base string, fmt *string) (string, int, string, string, string, error) {
-	data, err := base64.StdEncoding.DecodeString(b64)
-	if err != nil { data = []byte(b64) }
-
-	// Detect MIME type
-	mt := mimetype.Detect(data).String()
-
-	// Try to get extension from provided format first, then from detected MIME type
-	ext := ""
-	if fmt != nil {
-		if e, err := mime.ExtensionsByType(*fmt); err == nil && len(e) > 0 { ext = e[0] }
+func saveInline(raw string, attDir, base string, fmtType *string, maxBytes int64) (string, int64, string, string, string, error) {
+	// Use secure temp file creation to avoid race conditions
+	tmpFile, err := os.CreateTemp(attDir, base+"-*.tmp")
+	if err != nil {
+		return "", 0, "", "", "", err
 	}
-	if ext == "" {
-		// Use detected MIME type to get extension
-		if e, err := mime.ExtensionsByType(mt); err == nil && len(e) > 0 { ext = e[0] }
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+
+	n, md5sum, shaSum, err := writeWithLimit(base64.NewDecoder(base64.StdEncoding, strings.NewReader(raw)), tmpPath, maxBytes)
+	if err != nil {
+		os.Remove(tmpPath)
+		if isIllegalBase64(err) {
+			n, md5sum, shaSum, err = writeWithLimit(strings.NewReader(raw), tmpPath, maxBytes)
+			if err != nil {
+				os.Remove(tmpPath)
+				return "", 0, "", "", "", err
+			}
+		} else {
+			return "", 0, "", "", "", err
+		}
 	}
 
-	fn := base + ext
-	path := filepath.Join(attDir, fn)
-	if err := os.WriteFile(path, data, 0o644); err != nil { return "", 0, "", "", "", err }
-	h1 := md5.Sum(data)
-	h2 := sha256.Sum256(data)
-	md5s := fmtHex(h1[:])
-	sha := fmtHex(h2[:])
-	return path, len(data), md5s, sha, mt, nil
+	mt, err := detectMIME(tmpPath)
+	if err != nil {
+		os.Remove(tmpPath)
+		return "", 0, "", "", "", err
+	}
+
+	finalName := base + chooseExtension(fmtType, mt)
+	finalPath := filepath.Join(attDir, finalName)
+
+	// Validate path to prevent traversal attacks
+	if err := validatePath(finalPath, attDir); err != nil {
+		os.Remove(tmpPath)
+		return "", 0, "", "", "", err
+	}
+
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		os.Remove(tmpPath)
+		return "", 0, "", "", "", err
+	}
+
+	// Set final permissions
+	if err := os.Chmod(finalPath, attachmentFilePerm); err != nil {
+		os.Remove(finalPath)
+		return "", 0, "", "", "", err
+	}
+
+	return finalPath, n, fmtHex(md5sum), fmtHex(shaSum), mt, nil
 }
 
-func filenameFromURL(u string, fmt *string, fallbackBase string) string {
-	if uu, err := url.Parse(u); err == nil {
-		if base := filepath.Base(uu.Path); base != "" && base != "/" { return base }
+func downloadURL(u, attDir, base string, fmtType *string, maxBytes int64) (string, int64, string, string, string, error) {
+	// Create HTTP client with redirect limiting
+	redirectCount := 0
+	client := &http.Client{
+		Timeout: attachmentDownloadTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			redirectCount++
+			if redirectCount > maxRedirects {
+				return fmt.Errorf("too many redirects (max %d)", maxRedirects)
+			}
+			return nil
+		},
 	}
-	if fmt != nil {
-		if exts, _ := mime.ExtensionsByType(*fmt); len(exts) > 0 { return fallbackBase + exts[0] }
+
+	req, err := http.NewRequest("GET", u, nil)
+	if err != nil {
+		return "", 0, "", "", "", err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", 0, "", "", "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", 0, "", "", "", fmt.Errorf("unexpected HTTP status %s", resp.Status)
+	}
+
+	if resp.ContentLength > 0 && resp.ContentLength > maxBytes {
+		return "", 0, "", "", "", fmt.Errorf("%w: maximum %d bytes", errAttachmentTooLarge, maxBytes)
+	}
+
+	filename := filenameFromURL(u, fmtType, base)
+	if filename == "" {
+		filename = base
+	}
+
+	// Use secure temp file creation
+	tmpFile, err := os.CreateTemp(attDir, filename+"-*.tmp")
+	if err != nil {
+		return "", 0, "", "", "", err
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+
+	n, md5sum, shaSum, err := writeWithLimit(resp.Body, tmpPath, maxBytes)
+	if err != nil {
+		os.Remove(tmpPath)
+		return "", 0, "", "", "", err
+	}
+
+	mt, err := detectMIME(tmpPath)
+	if err != nil {
+		os.Remove(tmpPath)
+		return "", 0, "", "", "", err
+	}
+
+	ext := chooseExtension(fmtType, mt)
+	finalName := filename
+	if ext != "" && !strings.HasSuffix(strings.ToLower(finalName), strings.ToLower(ext)) {
+		finalName = base + ext
+	}
+	finalPath := filepath.Join(attDir, finalName)
+
+	// Validate path to prevent traversal attacks
+	if err := validatePath(finalPath, attDir); err != nil {
+		os.Remove(tmpPath)
+		return "", 0, "", "", "", err
+	}
+
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		os.Remove(tmpPath)
+		return "", 0, "", "", "", err
+	}
+
+	// Set final permissions
+	if err := os.Chmod(finalPath, attachmentFilePerm); err != nil {
+		os.Remove(finalPath)
+		return "", 0, "", "", "", err
+	}
+
+	return finalPath, n, fmtHex(md5sum), fmtHex(shaSum), mt, nil
+}
+
+func filenameFromURL(u string, fmtType *string, fallbackBase string) string {
+	if parsed, err := url.Parse(u); err == nil {
+		if base := filepath.Base(parsed.Path); base != "" && base != "/" {
+			return base
+		}
+	}
+	if fmtType != nil {
+		if exts, _ := mime.ExtensionsByType(*fmtType); len(exts) > 0 {
+			return fallbackBase + exts[0]
+		}
 	}
 	return fallbackBase
 }
 
-func downloadURL(u, attDir, base string, fmt *string) (string, int, string, string, string, error) {
-	req, _ := http.NewRequest("GET", u, nil)
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil { return "", 0, "", "", "", err }
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 { return "", 0, "", "", "", errors.New(resp.Status) }
-	fn := filenameFromURL(u, fmt, base)
-	path := filepath.Join(attDir, fn)
-	f, err := os.Create(path)
-	if err != nil { return "", 0, "", "", "", err }
+func writeWithLimit(r io.Reader, path string, maxBytes int64) (int64, []byte, []byte, error) {
+	if maxBytes <= 0 {
+		return 0, nil, nil, errors.New("maxBytes must be positive")
+	}
+
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, attachmentFilePerm)
+	if err != nil {
+		return 0, nil, nil, err
+	}
 	defer f.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil { return "", 0, "", "", "", err }
-	if _, err := f.Write(body); err != nil { return "", 0, "", "", "", err }
-	h1 := md5.Sum(body)
-	h2 := sha256.Sum256(body)
-	md5s := fmtHex(h1[:])
-	sha := fmtHex(h2[:])
-	mt := mimetype.Detect(body).String()
-	return path, len(body), md5s, sha, mt, nil
+
+	md5h := md5.New()
+	sha := sha256.New()
+
+	limited := &io.LimitedReader{R: r, N: maxBytes + 1}
+	n, err := io.Copy(io.MultiWriter(f, md5h, sha), limited)
+	if err != nil {
+		return n, nil, nil, err
+	}
+	if limited.N <= 0 {
+		return n, nil, nil, fmt.Errorf("%w: maximum %d bytes", errAttachmentTooLarge, maxBytes)
+	}
+
+	return n, md5h.Sum(nil), sha.Sum(nil), nil
 }
 
-func fmtHex(b []byte) string {
-    const hexdig = "0123456789abcdef"
-    out := make([]byte, len(b)*2)
-    for i, v := range b {
-        out[i*2] = hexdig[v>>4]
-        out[i*2+1] = hexdig[v&0x0f]
-    }
-    return string(out)
+func detectMIME(path string) (string, error) {
+	mt, err := mimetype.DetectFile(path)
+	if err != nil {
+		return "", err
+	}
+	if mt == nil {
+		return "", nil
+	}
+	return mt.String(), nil
 }
-func min(a,b int) int { if a<b { return a }; return b }
+
+func chooseExtension(fmtType *string, detected string) string {
+	if fmtType != nil {
+		if exts, err := mime.ExtensionsByType(*fmtType); err == nil && len(exts) > 0 {
+			return exts[0]
+		}
+	}
+	if detected != "" {
+		if exts, err := mime.ExtensionsByType(detected); err == nil && len(exts) > 0 {
+			return exts[0]
+		}
+	}
+	return ""
+}
+
+func fmtHex(sum []byte) string {
+	const digits = "0123456789abcdef"
+	out := make([]byte, len(sum)*2)
+	for i, v := range sum {
+		out[i*2] = digits[v>>4]
+		out[i*2+1] = digits[v&0x0f]
+	}
+	return string(out)
+}
+
+func isIllegalBase64(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "illegal base64 data")
+}
+
+func intPtrFromInt64(v int64) *int {
+	if v < 0 {
+		return nil
+	}
+	if v > int64(^uint(0)>>1) {
+		v = int64(^uint(0) >> 1)
+	}
+	val := int(v)
+	return &val
+}
+
+func noteAttachmentError(identifier string, err error) {
+	if err == nil {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "warning: skipping attachment %q: %v\n", identifier, err)
+}
+
+func pickFirstError(existing, candidate error) error {
+	if existing != nil {
+		return existing
+	}
+	return candidate
+}

@@ -18,6 +18,8 @@ Security-oriented heuristics drive the renderer: descriptions are normalised for
 - **Attachment extraction**: inline base64 blobs (including vCards) and remote links are saved into the output directory.
 - **URL harvesting**: every description/todo body is scanned for URLs and surfaced in the manifest.
 
+> ⚠️ `--download-attachments` contacts remote hosts. Use it only on trusted networks and adjust `--max-attachment-bytes` (default 1 GiB) to keep per-file size in check.
+
 ## Quick Start
 
 ```bash
@@ -29,6 +31,7 @@ GOCACHE=$(pwd)/.gocache go run ./cmd/ics-ics-baby \
   --out out/badinvite1 \
   --html out/badinvite1/ics-ics-baby-preview.html \
   --screenshot out/badinvite1/ics-ics-baby-preview.png \
+  --max-attachment-bytes 1073741824 \
   --download-attachments \
   /path/to/suspect.ics
 ```
