@@ -60,18 +60,26 @@ func joinStrings(items []string, sep string) string {
 	return strings.Join(items, sep)
 }
 
-var hexColorPattern = regexp.MustCompile(`^#(?i:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$`)
+var (
+	hexColorPattern     = regexp.MustCompile(`^#(?i:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$`)
+	bareHexColorPattern = regexp.MustCompile(`^(?i:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$`)
+	cssKeywordPattern   = regexp.MustCompile(`^(?i:[a-z]+(?:-[a-z]+)*)$`)
+)
 
 func sanitizeColorValue(value string) string {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
 		return ""
 	}
-	if !strings.HasPrefix(trimmed, "#") {
-		trimmed = "#" + trimmed
+	lower := strings.ToLower(trimmed)
+	if cssKeywordPattern.MatchString(lower) {
+		return lower
 	}
-	if hexColorPattern.MatchString(trimmed) {
+	if strings.HasPrefix(trimmed, "#") && hexColorPattern.MatchString(trimmed) {
 		return strings.ToLower(trimmed)
+	}
+	if bareHexColorPattern.MatchString(trimmed) {
+		return "#" + strings.ToLower(trimmed)
 	}
 	return ""
 }
@@ -435,12 +443,6 @@ var tmpl = template.Must(template.New("invite").Funcs(template.FuncMap{
 		s = strings.ReplaceAll(s, "\\;", ";")
 		s = strings.ReplaceAll(s, "\\\\", "\\")
 		return s
-	},
-	"safeHTML": func(p *string) template.HTML {
-		if p == nil {
-			return ""
-		}
-		return template.HTML(*p)
 	},
 	"str":                       derefString,
 	"formatInt":                 formatIntPtr,
@@ -964,8 +966,8 @@ html,body {
         {{ end }}
       </div>
 
-      {{ if .DescriptionHTML }}
-      <div class="desc-box desc-html">{{ safeHTML .DescriptionHTML }}</div>
+      {{ if .DescriptionHTMLSafe }}
+      <div class="desc-box desc-html">{{ .DescriptionHTMLSafe }}</div>
       {{ else if .Description }}
       <div class="desc-box desc-text">{{ cleanText (str .Description) }}</div>
       {{ end }}
@@ -1205,8 +1207,8 @@ html,body {
         {{ end }}
       </div>
 
-      {{ if .DescriptionHTML }}
-      <div class="desc-box desc-html">{{ safeHTML .DescriptionHTML }}</div>
+      {{ if .DescriptionHTMLSafe }}
+      <div class="desc-box desc-html">{{ .DescriptionHTMLSafe }}</div>
       {{ else if .Description }}
       <div class="desc-box desc-text">{{ cleanText (str .Description) }}</div>
       {{ end }}
@@ -1336,8 +1338,8 @@ html,body {
         {{ end }}
       </div>
 
-      {{ if .DescriptionHTML }}
-      <div class="desc-box desc-html">{{ safeHTML .DescriptionHTML }}</div>
+      {{ if .DescriptionHTMLSafe }}
+      <div class="desc-box desc-html">{{ .DescriptionHTMLSafe }}</div>
       {{ else if .Description }}
       <div class="desc-box desc-text">{{ cleanText (str .Description) }}</div>
       {{ end }}
@@ -1455,8 +1457,8 @@ html,body {
         {{ end }}
       </div>
 
-      {{ if .DescriptionHTML }}
-      <div class="desc-box desc-html">{{ safeHTML .DescriptionHTML }}</div>
+      {{ if .DescriptionHTMLSafe }}
+      <div class="desc-box desc-html">{{ .DescriptionHTMLSafe }}</div>
       {{ else if .Description }}
       <div class="desc-box desc-text">{{ cleanText (str .Description) }}</div>
       {{ end }}
@@ -1537,6 +1539,26 @@ html,body {
 </body>
 </html>`))
 
+type eventDisplay struct {
+	icsparse.EventInfo
+	DescriptionHTMLSafe template.HTML
+}
+
+type todoDisplay struct {
+	icsparse.TodoInfo
+	DescriptionHTMLSafe template.HTML
+}
+
+type availabilityDisplay struct {
+	icsparse.AvailabilityInfo
+	DescriptionHTMLSafe template.HTML
+}
+
+type journalDisplay struct {
+	icsparse.JournalInfo
+	DescriptionHTMLSafe template.HTML
+}
+
 type viewData struct {
 	Name            *string
 	ProdID          *string
@@ -1546,11 +1568,11 @@ type viewData struct {
 	Calscale        *string
 	TimezoneID      *string
 	Timezones       []icsparse.TimezoneInfo
-	Events          []icsparse.EventInfo
-	Todos           []icsparse.TodoInfo
+	Events          []eventDisplay
+	Todos           []todoDisplay
 	FreeBusy        []icsparse.FreeBusyInfo
-	Availabilities  []icsparse.AvailabilityInfo
-	Journals        []icsparse.JournalInfo
+	Availabilities  []availabilityDisplay
+	Journals        []journalDisplay
 	Style           string
 	AccentColor     string
 	CalendarColor   string
@@ -1561,12 +1583,57 @@ type viewData struct {
 	Source          *string
 }
 
+// convertSanitizedHTML safely converts pre-sanitized HTML strings to template.HTML
+// This should ONLY be used with HTML that has already been sanitized by sanitizeDescriptionHTML
+func convertSanitizedHTML(htmlPtr *string) template.HTML {
+	if htmlPtr == nil {
+		return ""
+	}
+	// The HTML has already been sanitized by icsparse.sanitizeDescriptionHTML
+	// which removes dangerous tags, attributes, and javascript: URLs
+	return template.HTML(*htmlPtr)
+}
+
 func WriteInviteHTML(cal *icsparse.CalendarInfo, outPath string, style string) error {
 	accent := "#ff6600"
 	calColor := sanitizeColorPtr(cal.Color)
 	if calColor != "" {
 		accent = calColor
 	}
+
+	// Convert sanitized HTML to template.HTML for safe rendering
+	events := make([]eventDisplay, len(cal.Events))
+	for i, e := range cal.Events {
+		events[i] = eventDisplay{
+			EventInfo:           e,
+			DescriptionHTMLSafe: convertSanitizedHTML(e.DescriptionHTML),
+		}
+	}
+
+	todos := make([]todoDisplay, len(cal.Todos))
+	for i, t := range cal.Todos {
+		todos[i] = todoDisplay{
+			TodoInfo:            t,
+			DescriptionHTMLSafe: convertSanitizedHTML(t.DescriptionHTML),
+		}
+	}
+
+	availabilities := make([]availabilityDisplay, len(cal.Availabilities))
+	for i, a := range cal.Availabilities {
+		availabilities[i] = availabilityDisplay{
+			AvailabilityInfo:    a,
+			DescriptionHTMLSafe: convertSanitizedHTML(a.DescriptionHTML),
+		}
+	}
+
+	journals := make([]journalDisplay, len(cal.Journals))
+	for i, j := range cal.Journals {
+		journals[i] = journalDisplay{
+			JournalInfo:         j,
+			DescriptionHTMLSafe: convertSanitizedHTML(j.DescriptionHTML),
+		}
+	}
+
 	data := viewData{
 		Name:            cal.Name,
 		ProdID:          cal.ProdID,
@@ -1576,11 +1643,11 @@ func WriteInviteHTML(cal *icsparse.CalendarInfo, outPath string, style string) e
 		Calscale:        cal.Calscale,
 		TimezoneID:      cal.TimezoneID,
 		Timezones:       cal.Timezones,
-		Events:          cal.Events,
-		Todos:           cal.Todos,
+		Events:          events,
+		Todos:           todos,
 		FreeBusy:        cal.FreeBusy,
-		Availabilities:  cal.Availabilities,
-		Journals:        cal.Journals,
+		Availabilities:  availabilities,
+		Journals:        journals,
 		Style:           style,
 		AccentColor:     accent,
 		CalendarColor:   calColor,

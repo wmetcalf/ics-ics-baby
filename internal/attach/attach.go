@@ -33,22 +33,30 @@ var (
 
 // validatePath ensures the final path is within the allowed directory
 func validatePath(path, allowedDir string) error {
-	cleanPath := filepath.Clean(path)
-	cleanDir := filepath.Clean(allowedDir)
-
-	// Make both absolute for comparison
-	absPath, err := filepath.Abs(cleanPath)
+	// Clean and resolve both paths to absolute form
+	absPath, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
 		return fmt.Errorf("%w: cannot resolve path", errPathTraversal)
 	}
 
-	absDir, err := filepath.Abs(cleanDir)
+	absDir, err := filepath.Abs(filepath.Clean(allowedDir))
 	if err != nil {
 		return fmt.Errorf("%w: cannot resolve directory", errPathTraversal)
 	}
 
-	// Check if path is within directory
-	if !strings.HasPrefix(absPath, absDir+string(filepath.Separator)) {
+	// Ensure absDir ends with separator for accurate comparison
+	if !strings.HasSuffix(absDir, string(filepath.Separator)) {
+		absDir += string(filepath.Separator)
+	}
+
+	// Use filepath.Rel for proper path relationship checking
+	rel, err := filepath.Rel(absDir, absPath)
+	if err != nil {
+		return fmt.Errorf("%w: path relationship error", errPathTraversal)
+	}
+
+	// Check if the relative path tries to escape using ".."
+	if strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
 		return fmt.Errorf("%w: path %s is outside %s", errPathTraversal, absPath, absDir)
 	}
 

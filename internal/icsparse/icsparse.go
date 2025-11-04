@@ -1471,9 +1471,6 @@ var (
 	skipElements        = map[string]bool{"script": true, "style": true, "noscript": true}
 	blockBefore         = map[string]bool{"p": true, "div": true, "section": true, "article": true, "header": true, "footer": true, "table": true, "tr": true, "tbody": true, "thead": true, "h1": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true}
 	blockAfter          = map[string]bool{"p": true, "div": true, "section": true, "article": true, "header": true, "footer": true, "table": true, "tr": true, "tbody": true, "thead": true, "ul": true, "ol": true, "li": true, "h1": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true}
-	scriptStripper      = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
-	styleStripper       = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
-	tagStripper         = regexp.MustCompile(`(?s)<[^>]+>`)
 	spaceCollapse       = regexp.MustCompile(`[ \t\f\r\v]+`)
 	htmlTagDetector     = regexp.MustCompile(`(?is)</?[a-z][^>]*>`)
 	allowedDescElements = map[string]bool{
@@ -1586,7 +1583,7 @@ func htmlToPlainText(input string) string {
 		return fallbackPlainText(trimmed)
 	}
 	var writer plainTextWriter
-	extractPlainText(doc, &writer)
+	extractPlainText(doc, &writer, 0)
 	out := normalizeWhitespace(writer.String())
 	if out == "" {
 		return fallbackPlainText(trimmed)
@@ -1595,11 +1592,21 @@ func htmlToPlainText(input string) string {
 }
 
 func fallbackPlainText(input string) string {
-	clean := scriptStripper.ReplaceAllString(input, "")
-	clean = styleStripper.ReplaceAllString(clean, "")
-	clean = tagStripper.ReplaceAllString(clean, " ")
-	clean = spaceCollapse.ReplaceAllString(clean, " ")
-	return strings.TrimSpace(htmlstd.UnescapeString(clean))
+	// Use the HTML parser to safely extract text instead of vulnerable regex patterns
+	// This avoids ReDoS attacks from malicious nested tags
+	doc, err := htmlnode.Parse(strings.NewReader(input))
+	if err != nil {
+		// If parsing fails completely, just unescape HTML entities and return
+		return strings.TrimSpace(htmlstd.UnescapeString(input))
+	}
+	var writer plainTextWriter
+	extractPlainText(doc, &writer, 0)
+	result := normalizeWhitespace(writer.String())
+	if result == "" {
+		// Last resort: just unescape and return
+		return strings.TrimSpace(htmlstd.UnescapeString(input))
+	}
+	return result
 }
 
 type plainTextWriter struct {
@@ -1637,6 +1644,10 @@ func looksLikeHTML(text string) bool {
 	return htmlTagDetector.MatchString(trimmed)
 }
 
+const (
+	maxHTMLDepth = 1000 // Maximum depth for HTML node recursion to prevent stack overflow
+)
+
 func sanitizeDescriptionHTML(input string) string {
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "" {
@@ -1649,13 +1660,17 @@ func sanitizeDescriptionHTML(input string) string {
 	}
 	var buf strings.Builder
 	for _, n := range nodes {
-		renderSanitizedNode(&buf, n)
+		renderSanitizedNode(&buf, n, 0)
 	}
 	out := strings.TrimSpace(buf.String())
 	return out
 }
 
-func renderSanitizedNode(buf *strings.Builder, node *htmlnode.Node) {
+func renderSanitizedNode(buf *strings.Builder, node *htmlnode.Node, depth int) {
+	// Prevent stack overflow from deeply nested HTML
+	if depth > maxHTMLDepth {
+		return
+	}
 	switch node.Type {
 	case htmlnode.TextNode:
 		text := htmlstd.UnescapeString(node.Data)
@@ -1669,7 +1684,7 @@ func renderSanitizedNode(buf *strings.Builder, node *htmlnode.Node) {
 		}
 		if !allowedDescElements[name] {
 			for c := node.FirstChild; c != nil; c = c.NextSibling {
-				renderSanitizedNode(buf, c)
+				renderSanitizedNode(buf, c, depth+1)
 			}
 			return
 		}
@@ -1688,14 +1703,14 @@ func renderSanitizedNode(buf *strings.Builder, node *htmlnode.Node) {
 		}
 		buf.WriteByte('>')
 		for c := node.FirstChild; c != nil; c = c.NextSibling {
-			renderSanitizedNode(buf, c)
+			renderSanitizedNode(buf, c, depth+1)
 		}
 		buf.WriteString("</")
 		buf.WriteString(name)
 		buf.WriteByte('>')
 	default:
 		for c := node.FirstChild; c != nil; c = c.NextSibling {
-			renderSanitizedNode(buf, c)
+			renderSanitizedNode(buf, c, depth+1)
 		}
 	}
 }
@@ -1817,7 +1832,11 @@ func (w *plainTextWriter) String() string {
 	return w.b.String()
 }
 
-func extractPlainText(n *htmlnode.Node, w *plainTextWriter) {
+func extractPlainText(n *htmlnode.Node, w *plainTextWriter, depth int) {
+	// Prevent stack overflow from deeply nested HTML
+	if depth > maxHTMLDepth {
+		return
+	}
 	if n.Type == htmlnode.ElementNode {
 		name := strings.ToLower(n.Data)
 		if skipElements[name] {
@@ -1838,7 +1857,7 @@ func extractPlainText(n *htmlnode.Node, w *plainTextWriter) {
 		w.writeText(htmlstd.UnescapeString(n.Data))
 	}
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		extractPlainText(c, w)
+		extractPlainText(c, w, depth+1)
 	}
 	if n.Type == htmlnode.ElementNode {
 		name := strings.ToLower(n.Data)
@@ -1931,6 +1950,7 @@ func PopulateDiscoveredURLs(c *CalendarInfo) {
 	}
 	for i := range c.Events {
 		e := &c.Events[i]
+		e.DiscoveredURLs = nil
 		urls := []string{}
 		urls = append(urls, ExtractURLs(e.Summary)...)
 		if e.Description != nil {
@@ -1967,6 +1987,7 @@ func PopulateDiscoveredURLs(c *CalendarInfo) {
 	}
 	for i := range c.Todos {
 		td := &c.Todos[i]
+		td.DiscoveredURLs = nil
 		urls := []string{}
 		urls = append(urls, ExtractURLs(td.Summary)...)
 		if td.Description != nil {
@@ -1997,6 +2018,7 @@ func PopulateDiscoveredURLs(c *CalendarInfo) {
 	}
 	for i := range c.Journals {
 		jn := &c.Journals[i]
+		jn.DiscoveredURLs = nil
 		urls := []string{}
 		urls = append(urls, ExtractURLs(jn.Summary)...)
 		if jn.Description != nil {

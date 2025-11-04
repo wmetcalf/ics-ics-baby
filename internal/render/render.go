@@ -33,18 +33,26 @@ type palette struct {
 	ChipBg color.Color
 }
 
-var hexColorPattern = regexp.MustCompile(`^#(?i:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$`)
+var (
+	hexColorPattern     = regexp.MustCompile(`^#(?i:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$`)
+	bareHexColorPattern = regexp.MustCompile(`^(?i:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$`)
+	cssKeywordPattern   = regexp.MustCompile(`^(?i:[a-z]+(?:-[a-z]+)*)$`)
+)
 
 func sanitizeColorValue(value string) string {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
 		return ""
 	}
-	if !strings.HasPrefix(trimmed, "#") {
-		trimmed = "#" + trimmed
+	lower := strings.ToLower(trimmed)
+	if cssKeywordPattern.MatchString(lower) {
+		return lower
 	}
-	if hexColorPattern.MatchString(trimmed) {
+	if strings.HasPrefix(trimmed, "#") && hexColorPattern.MatchString(trimmed) {
 		return strings.ToLower(trimmed)
+	}
+	if bareHexColorPattern.MatchString(trimmed) {
+		return "#" + strings.ToLower(trimmed)
 	}
 	return ""
 }
