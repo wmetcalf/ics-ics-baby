@@ -8,7 +8,9 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +31,94 @@ type palette struct {
 	Edge   color.Color
 	Accent color.Color
 	ChipBg color.Color
+}
+
+var hexColorPattern = regexp.MustCompile(`^#(?i:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$`)
+
+func sanitizeColorValue(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	if !strings.HasPrefix(trimmed, "#") {
+		trimmed = "#" + trimmed
+	}
+	if hexColorPattern.MatchString(trimmed) {
+		return strings.ToLower(trimmed)
+	}
+	return ""
+}
+
+func sanitizeColorPtr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return sanitizeColorValue(*p)
+}
+
+func parseHexColor(hex string) (color.Color, bool) {
+	trimmed := strings.TrimPrefix(hex, "#")
+	var r, g, b, a uint64
+	var err error
+	switch len(trimmed) {
+	case 3:
+		r, err = strconv.ParseUint(strings.Repeat(string(trimmed[0]), 2), 16, 8)
+		if err != nil {
+			return nil, false
+		}
+		g, err = strconv.ParseUint(strings.Repeat(string(trimmed[1]), 2), 16, 8)
+		if err != nil {
+			return nil, false
+		}
+		b, err = strconv.ParseUint(strings.Repeat(string(trimmed[2]), 2), 16, 8)
+		if err != nil {
+			return nil, false
+		}
+		a = 0xff
+	case 6:
+		r, err = strconv.ParseUint(trimmed[0:2], 16, 8)
+		if err != nil {
+			return nil, false
+		}
+		g, err = strconv.ParseUint(trimmed[2:4], 16, 8)
+		if err != nil {
+			return nil, false
+		}
+		b, err = strconv.ParseUint(trimmed[4:6], 16, 8)
+		if err != nil {
+			return nil, false
+		}
+		a = 0xff
+	case 8:
+		r, err = strconv.ParseUint(trimmed[0:2], 16, 8)
+		if err != nil {
+			return nil, false
+		}
+		g, err = strconv.ParseUint(trimmed[2:4], 16, 8)
+		if err != nil {
+			return nil, false
+		}
+		b, err = strconv.ParseUint(trimmed[4:6], 16, 8)
+		if err != nil {
+			return nil, false
+		}
+		a, err = strconv.ParseUint(trimmed[6:8], 16, 8)
+		if err != nil {
+			return nil, false
+		}
+	default:
+		return nil, false
+	}
+	return color.RGBA{R: uint8(r), G: uint8(g), B: uint8(b), A: uint8(a)}, true
+}
+
+func parseAccentColor(colorPtr *string, fallback color.Color) color.Color {
+	if hex := sanitizeColorPtr(colorPtr); hex != "" {
+		if parsed, ok := parseHexColor(hex); ok {
+			return parsed
+		}
+	}
+	return fallback
 }
 
 func getPalette(style string) palette {
@@ -218,6 +308,7 @@ func RenderAgendaPNG(cal *icsparse.CalendarInfo, outPath string, width int, styl
 	const smallSize = 12.0
 
 	pal := getPalette(style)
+	pal.Accent = parseAccentColor(cal.Color, pal.Accent)
 
 	events := make([]icsparse.EventInfo, len(cal.Events))
 	copy(events, cal.Events)
@@ -236,6 +327,121 @@ func RenderAgendaPNG(cal *icsparse.CalendarInfo, outPath string, width int, styl
 		charsPerLine := float64(width-2*int(pad)-2*int(cardPad)) / 8.0
 		lines := math.Ceil(float64(len([]rune(desc))) / charsPerLine)
 		cardH := cardBase + lines*lineH + float64(len(e.Attachments))*18.0
+		h += int(cardH + eventPad)
+	}
+	if len(cal.Availabilities) > 0 {
+		h += int(lineH * 2)
+	}
+	for _, av := range cal.Availabilities {
+		cardBase := 70.0
+		desc := ""
+		if av.DescriptionHTML != nil && *av.DescriptionHTML != "" {
+			desc = icsparse.PlainTextFromHTML(*av.DescriptionHTML)
+		} else if av.Description != nil {
+			desc = cleanText(*av.Description)
+		}
+		desc = strings.TrimSpace(desc)
+		descLines := math.Ceil(float64(len([]rune(desc))) / (float64(width-2*int(pad)-2*int(cardPad)) / 8.0))
+
+		infoCount := 0.0
+		if av.BusyType != nil && *av.BusyType != "" {
+			infoCount++
+		}
+		if av.Start != nil {
+			infoCount++
+		}
+		if av.End != nil {
+			infoCount++
+		}
+		if av.Duration != nil && *av.Duration != "" {
+			infoCount++
+		}
+		if av.Location != nil && *av.Location != "" {
+			infoCount++
+		}
+		if len(av.Contacts) > 0 {
+			infoCount++
+		}
+		if len(av.Categories) > 0 {
+			infoCount++
+		}
+		if av.Organizer != nil && *av.Organizer != "" {
+			infoCount++
+		}
+		if av.URL != nil && *av.URL != "" {
+			infoCount++
+		}
+		for _, slot := range av.Available {
+			infoCount++
+			infoCount += float64(len(availabilityWindowDetailTexts(slot)))
+		}
+
+		cardH := cardBase + infoCount*lineH + descLines*lineH
+		h += int(cardH + eventPad)
+	}
+	if len(cal.Journals) > 0 {
+		h += int(lineH * 2)
+	}
+	for _, jn := range cal.Journals {
+		cardBase := 90.0
+		desc := ""
+		if jn.DescriptionHTML != nil && *jn.DescriptionHTML != "" {
+			desc = icsparse.PlainTextFromHTML(*jn.DescriptionHTML)
+		} else if jn.Description != nil {
+			desc = cleanText(*jn.Description)
+		}
+		desc = strings.TrimSpace(desc)
+		descLines := math.Ceil(float64(len([]rune(desc))) / (float64(width-2*int(pad)-2*int(cardPad)) / 8.0))
+		infoCount := 0.0
+		if jn.DTStart != nil {
+			infoCount++
+		}
+		if jn.Organizer != nil && *jn.Organizer != "" {
+			infoCount++
+		}
+		if jn.Status != nil && *jn.Status != "" {
+			infoCount++
+		}
+		if jn.Class != nil && *jn.Class != "" {
+			infoCount++
+		}
+		if len(jn.Categories) > 0 {
+			infoCount++
+		}
+		if len(jn.Contacts) > 0 {
+			infoCount++
+		}
+		if len(jn.RelatedTo) > 0 {
+			infoCount++
+		}
+		if jn.URL != nil && *jn.URL != "" {
+			infoCount++
+		}
+		if jn.DateTimeStamp != nil {
+			infoCount++
+		}
+		if jn.Created != nil {
+			infoCount++
+		}
+		if jn.LastModified != nil {
+			infoCount++
+		}
+		if jn.Recurrence != nil && (jn.Recurrence.RRule != nil || len(jn.Recurrence.RDates) > 0 || len(jn.Recurrence.ExDates) > 0) {
+			infoCount++
+		}
+		if len(jn.Attendees) > 0 {
+			infoCount++
+		}
+		if len(jn.Conferences) > 0 {
+			infoCount++
+		}
+		if len(jn.Attachments) > 0 {
+			infoCount++
+		}
+		if len(jn.Images) > 0 {
+			infoCount++
+		}
+		cardH := cardBase + infoCount*lineH + descLines*lineH
 		h += int(cardH + eventPad)
 	}
 	h += int(cardPad + pad)
@@ -358,10 +564,123 @@ func RenderAgendaPNG(cal *icsparse.CalendarInfo, outPath string, width int, styl
 		y += cardH + eventPad
 	}
 
-	foot := "This PNG was rendered locally without a browser."
-	dc.SetColor(pal.Muted)
-	dc.SetFontFace(loadFontFace("", smallSize))
-	dc.DrawStringAnchored(foot, panelX+cardPad, float64(img.Bounds().Dy())-pad, 0, 1)
+	if len(cal.Availabilities) > 0 {
+		dc.SetColor(pal.Text)
+		dc.SetFontFace(loadFontFace("", textSize+2))
+		dc.DrawStringAnchored("Published Availability", panelX+cardPad, y+lineH, 0, 0)
+		y += lineH * 1.8
+	}
+
+	for _, av := range cal.Availabilities {
+		cardX := panelX + cardPad
+		cardW := panelW - 2*cardPad
+
+		desc := ""
+		if av.DescriptionHTML != nil && *av.DescriptionHTML != "" {
+			desc = icsparse.PlainTextFromHTML(*av.DescriptionHTML)
+		} else if av.Description != nil {
+			desc = cleanText(*av.Description)
+		}
+		desc = strings.TrimSpace(desc)
+		dc.SetFontFace(loadFontFace("", textSize))
+		wrapWidth := cardW - 2*eventPad
+		descLines := dc.WordWrap(desc, wrapWidth)
+		descH := float64(len(descLines)) * lineH
+
+		infoLines := availabilityInfoLines(av)
+		infoH := float64(len(infoLines)) * lineH
+
+		cardH := 18.0 + lineH*2 + infoH + descH + eventPad
+
+		dc.SetColor(pal.Edge)
+		dc.DrawRoundedRectangle(cardX, y, cardW, cardH, 10)
+		dc.Fill()
+
+		innerX := cardX + eventPad
+		innerY := y + eventPad
+
+		summary := "Availability Window"
+		if av.Summary != nil && strings.TrimSpace(*av.Summary) != "" {
+			summary = strings.TrimSpace(*av.Summary)
+		}
+		dc.SetColor(pal.Text)
+		dc.SetFontFace(loadFontFace("", textSize+2))
+		dc.DrawStringAnchored(summary, innerX, innerY+lineH, 0, 0)
+
+		dc.SetFontFace(loadFontFace("", textSize))
+		dc.SetColor(pal.Muted)
+		metaY := innerY + lineH*2.0
+		for _, line := range infoLines {
+			dc.DrawStringAnchored(line, innerX, metaY, 0, 0)
+			metaY += lineH
+		}
+
+		dc.SetColor(pal.Text)
+		dc.SetFontFace(loadFontFace("", textSize))
+		textY := innerY + lineH*2.0 + infoH + lineH*0.4
+		dc.DrawStringWrapped(desc, innerX, textY, 0, 0, wrapWidth, 1.5, gg.AlignLeft)
+
+		y += cardH + eventPad
+	}
+
+	if len(cal.Journals) > 0 {
+		dc.SetColor(pal.Text)
+		dc.SetFontFace(loadFontFace("", textSize+2))
+		dc.DrawStringAnchored("Journal Entries", panelX+cardPad, y+lineH, 0, 0)
+		y += lineH * 1.8
+	}
+
+	for _, jn := range cal.Journals {
+		cardX := panelX + cardPad
+		cardW := panelW - 2*cardPad
+
+		desc := ""
+		if jn.DescriptionHTML != nil && *jn.DescriptionHTML != "" {
+			desc = icsparse.PlainTextFromHTML(*jn.DescriptionHTML)
+		} else if jn.Description != nil {
+			desc = cleanText(*jn.Description)
+		}
+		desc = strings.TrimSpace(desc)
+		dc.SetFontFace(loadFontFace("", textSize))
+		wrapWidth := cardW - 2*eventPad
+		descLines := dc.WordWrap(desc, wrapWidth)
+		descH := float64(len(descLines)) * lineH
+
+		infoLines := journalInfoLines(jn)
+		infoH := float64(len(infoLines)) * lineH
+
+		cardH := 18.0 + lineH*2 + infoH + descH + eventPad
+
+		dc.SetColor(pal.Edge)
+		dc.DrawRoundedRectangle(cardX, y, cardW, cardH, 10)
+		dc.Fill()
+
+		innerX := cardX + eventPad
+		innerY := y + eventPad
+
+		title := strings.TrimSpace(jn.Summary)
+		if title == "" {
+			title = "Journal Entry"
+		}
+		dc.SetColor(pal.Text)
+		dc.SetFontFace(loadFontFace("", textSize+2))
+		dc.DrawStringAnchored(title, innerX, innerY+lineH, 0, 0)
+
+		dc.SetFontFace(loadFontFace("", textSize))
+		dc.SetColor(pal.Muted)
+		metaY := innerY + lineH*2.0
+		for _, line := range infoLines {
+			dc.DrawStringAnchored(line, innerX, metaY, 0, 0)
+			metaY += lineH
+		}
+
+		dc.SetColor(pal.Text)
+		dc.SetFontFace(loadFontFace("", textSize))
+		textY := innerY + lineH*2.0 + infoH + lineH*0.4
+		dc.DrawStringWrapped(desc, innerX, textY, 0, 0, wrapWidth, 1.5, gg.AlignLeft)
+
+		y += cardH + eventPad
+	}
 
 	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
 		return err
@@ -406,12 +725,22 @@ type inviteEventLayout struct {
 	descHeight     float64
 	totalHeight    float64
 	hasDescription bool
+	iconColor      string
 }
 
 func RenderInvitePNG(cal *icsparse.CalendarInfo, outPath string, width int, style string) error {
 	pal := getPalette(style)
+	pal.Accent = parseAccentColor(cal.Color, pal.Accent)
 
-	layouts, totalHeight := buildInviteLayouts(cal.Events, width)
+	layouts, _ := buildInviteLayouts(cal.Events, width)
+	if len(cal.Events) == 0 && len(cal.Availabilities) > 0 {
+		layouts = nil
+	}
+	availLayouts := buildAvailabilityLayouts(cal.Availabilities, width)
+	layouts = append(layouts, availLayouts...)
+	journalLayouts := buildJournalLayouts(cal.Journals, width)
+	layouts = append(layouts, journalLayouts...)
+	totalHeight := calculateLayoutsHeight(layouts)
 	height := int(math.Ceil(math.Max(float64(inviteMinHeight), totalHeight)))
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 	draw.Draw(img, img.Bounds(), &image.Uniform{pal.Bg}, image.Point{}, draw.Src)
@@ -433,7 +762,13 @@ func RenderInvitePNG(cal *icsparse.CalendarInfo, outPath string, width int, styl
 
 		// Accent square
 		iconY := y + (layout.headerHeight-inviteIconSize)/2
-		dc.SetColor(pal.Accent)
+		iconColor := pal.Accent
+		if layout.iconColor != "" {
+			if parsed, ok := parseHexColor(layout.iconColor); ok {
+				iconColor = parsed
+			}
+		}
+		dc.SetColor(iconColor)
 		dc.DrawRoundedRectangle(invitePad+inviteHeaderPadX, iconY, inviteIconSize, inviteIconSize, 4)
 		dc.Fill()
 
@@ -493,12 +828,6 @@ func RenderInvitePNG(cal *icsparse.CalendarInfo, outPath string, width int, styl
 		}
 	}
 
-	// Footer note
-	foot := "This PNG was rendered locally without a browser."
-	dc.SetColor(pal.Muted)
-	dc.SetFontFace(labelFace)
-	dc.DrawStringAnchored(foot, invitePad, float64(img.Bounds().Dy())-invitePad*0.5, 0, 1)
-
 	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
 		return err
 	}
@@ -557,6 +886,7 @@ func buildInviteLayouts(events []icsparse.EventInfo, width int) ([]inviteEventLa
 			}
 			titleHeight := inviteHeaderLineH * float64(len(layout.summaryLines))
 			layout.headerHeight = math.Max(inviteIconSize, titleHeight) + inviteHeaderPadY*2
+			layout.iconColor = sanitizeColorPtr(e.Color)
 
 			ctx.SetFontFace(textFace)
 			addField := func(label string, lines []string) []inviteField {
@@ -584,11 +914,17 @@ func buildInviteLayouts(events []icsparse.EventInfo, width int) ([]inviteEventLa
 					fields = append(fields, addField("Location:", wordWrapWithSmartURLs(ctx, loc, valueWidth))...)
 				}
 			}
+			if geo := geoLines(ctx, e.Geo, valueWidth); len(geo) > 0 {
+				fields = append(fields, addField("Coordinates:", geo)...)
+			}
 			if e.Organizer != nil {
 				org := cleanText(*e.Organizer)
 				if org != "" {
 					fields = append(fields, addField("Organizer:", wordWrapWithSmartURLs(ctx, org, valueWidth))...)
 				}
+			}
+			if contacts := bulletListLines(ctx, e.Contacts, valueWidth); len(contacts) > 0 {
+				fields = append(fields, addField("Contacts:", contacts)...)
 			}
 			if e.Status != nil && *e.Status != "" {
 				fields = append(fields, addField("Status:", []string{*e.Status})...)
@@ -604,6 +940,9 @@ func buildInviteLayouts(events []icsparse.EventInfo, width int) ([]inviteEventLa
 			}
 			if e.Sequence != nil {
 				fields = append(fields, addField("Sequence:", []string{fmt.Sprintf("%d", *e.Sequence)})...)
+			}
+			if hex := sanitizeColorPtr(e.Color); hex != "" {
+				fields = append(fields, addField("Color:", []string{hex})...)
 			}
 			if e.Duration != nil && *e.Duration != "" {
 				fields = append(fields, addField("Duration:", []string{*e.Duration})...)
@@ -621,6 +960,18 @@ func buildInviteLayouts(events []icsparse.EventInfo, width int) ([]inviteEventLa
 			if len(e.Resources) > 0 {
 				joined := strings.Join(e.Resources, ", ")
 				fields = append(fields, addField("Resources:", wordWrapWithSmartURLs(ctx, joined, valueWidth))...)
+			}
+			if comments := bulletListLines(ctx, e.Comments, valueWidth); len(comments) > 0 {
+				fields = append(fields, addField("Comments:", comments)...)
+			}
+			if related := bulletListLines(ctx, e.RelatedTo, valueWidth); len(related) > 0 {
+				fields = append(fields, addField("Related To:", related)...)
+			}
+			if statuses := requestStatusLines(ctx, e.RequestStatuses, valueWidth); len(statuses) > 0 {
+				fields = append(fields, addField("Request Status:", statuses)...)
+			}
+			if images := imageLines(ctx, e.Images, valueWidth); len(images) > 0 {
+				fields = append(fields, addField("Images:", images)...)
 			}
 			if conf := conferenceLines(ctx, e.Conferences, valueWidth); len(conf) > 0 {
 				fields = append(fields, addField("Conference:", conf)...)
@@ -708,6 +1059,503 @@ func buildInviteLayouts(events []icsparse.EventInfo, width int) ([]inviteEventLa
 	return layouts, total
 }
 
+func buildAvailabilityLayouts(avails []icsparse.AvailabilityInfo, width int) []inviteEventLayout {
+	if len(avails) == 0 {
+		return nil
+	}
+	contentWidth := float64(width) - 2*invitePad
+	if contentWidth < 200 {
+		contentWidth = 200
+	}
+	valueWidth := contentWidth - inviteLabelWidth - inviteLabelPadding
+	if valueWidth < 140 {
+		valueWidth = 140
+	}
+	descWidth := contentWidth - inviteDescPadding*2
+	if descWidth < 140 {
+		descWidth = 140
+	}
+	headerTextWidth := contentWidth - (inviteHeaderPadX*2 + inviteIconSize + inviteIconGap)
+	if headerTextWidth < 140 {
+		headerTextWidth = 140
+	}
+
+	ctx := gg.NewContext(width, 100)
+	titleFace := loadFontFace("", inviteTitleSize)
+	textFace := loadFontFace("", inviteTextSize)
+
+	layouts := make([]inviteEventLayout, 0, len(avails))
+
+	for _, av := range avails {
+		var layout inviteEventLayout
+		summary := "Availability Window"
+		if av.Summary != nil && strings.TrimSpace(*av.Summary) != "" {
+			summary = strings.TrimSpace(*av.Summary)
+		}
+		ctx.SetFontFace(titleFace)
+		layout.summaryLines = ctx.WordWrap(summary, headerTextWidth)
+		if len(layout.summaryLines) == 0 {
+			layout.summaryLines = []string{summary}
+		}
+		titleHeight := inviteHeaderLineH * float64(len(layout.summaryLines))
+		layout.headerHeight = math.Max(inviteIconSize, titleHeight) + inviteHeaderPadY*2
+
+		ctx.SetFontFace(textFace)
+		addField := func(label string, lines []string) []inviteField {
+			filtered := filterLines(lines, false)
+			if len(filtered) == 0 {
+				return nil
+			}
+			height := inviteLineHeight * float64(len(filtered))
+			if height < inviteLineHeight {
+				height = inviteLineHeight
+			}
+			return []inviteField{{label: label, lines: filtered, height: height}}
+		}
+
+		fields := make([]inviteField, 0, 16)
+		if av.BusyType != nil && *av.BusyType != "" {
+			fields = append(fields, addField("Busy Type:", []string{*av.BusyType})...)
+		}
+		if av.Start != nil {
+			fields = append(fields, addField("Start:", []string{formatDateTime(av.Start)})...)
+		}
+		if av.End != nil {
+			fields = append(fields, addField("End:", []string{formatDateTime(av.End)})...)
+		}
+		if av.Duration != nil && *av.Duration != "" {
+			fields = append(fields, addField("Duration:", []string{*av.Duration})...)
+		}
+		if av.Organizer != nil && *av.Organizer != "" {
+			fields = append(fields, addField("Organizer:", wordWrapWithSmartURLs(ctx, *av.Organizer, valueWidth))...)
+		}
+		if av.Location != nil && *av.Location != "" {
+			fields = append(fields, addField("Location:", wordWrapWithSmartURLs(ctx, *av.Location, valueWidth))...)
+		}
+		if av.URL != nil && *av.URL != "" {
+			fields = append(fields, addField("URL:", wordWrapWithSmartURLs(ctx, *av.URL, valueWidth))...)
+		}
+		if contacts := bulletListLines(ctx, av.Contacts, valueWidth); len(contacts) > 0 {
+			fields = append(fields, addField("Contacts:", contacts)...)
+		}
+		if len(av.Categories) > 0 {
+			fields = append(fields, addField("Categories:", wordWrapWithSmartURLs(ctx, strings.Join(av.Categories, ", "), valueWidth))...)
+		}
+		if av.Priority != nil {
+			fields = append(fields, addField("Priority:", []string{fmt.Sprintf("%d", *av.Priority)})...)
+		}
+		if av.Sequence != nil {
+			fields = append(fields, addField("Sequence:", []string{fmt.Sprintf("%d", *av.Sequence)})...)
+		}
+		if av.Created != nil {
+			fields = append(fields, addField("Created:", []string{formatDateTime(av.Created)})...)
+		}
+		if av.LastModified != nil {
+			fields = append(fields, addField("Last Modified:", []string{formatDateTime(av.LastModified)})...)
+		}
+		if av.DateTimeStamp != nil {
+			fields = append(fields, addField("Timestamp:", []string{formatDateTime(av.DateTimeStamp)})...)
+		}
+		if slots := availabilityWindowLines(ctx, av.Available, valueWidth); len(slots) > 0 {
+			fields = append(fields, addField("Slots:", slots)...)
+		}
+
+		layout.fields = fields
+		if len(fields) > 0 {
+			height := 0.0
+			for idx, f := range fields {
+				height += f.height
+				if idx < len(fields)-1 {
+					height += inviteFieldSpacing
+				}
+			}
+			layout.fieldsHeight = height
+		}
+
+		desc := ""
+		if av.DescriptionHTML != nil && *av.DescriptionHTML != "" {
+			desc = icsparse.PlainTextFromHTML(*av.DescriptionHTML)
+		} else if av.Description != nil {
+			desc = cleanText(*av.Description)
+		}
+		if strings.TrimSpace(desc) != "" {
+			descLines := wordWrapWithSmartURLs(ctx, desc, descWidth)
+			layout.descLines = filterLines(descLines, true)
+			if len(layout.descLines) > 0 {
+				layout.descHeight = inviteDescPadding*2 + inviteLineHeight*float64(len(layout.descLines))
+				layout.hasDescription = true
+			}
+		}
+
+		height := layout.headerHeight + inviteHeaderMargin
+		if len(layout.fields) > 0 {
+			height += layout.fieldsHeight
+			if layout.hasDescription {
+				height += inviteSectionSpacing
+			}
+		}
+		if layout.hasDescription {
+			height += layout.descHeight
+		}
+		layout.totalHeight = height
+		layouts = append(layouts, layout)
+	}
+
+	return layouts
+}
+
+func availabilityWindowLines(ctx *gg.Context, wins []icsparse.AvailableWindow, width float64) []string {
+	if len(wins) == 0 {
+		return nil
+	}
+	entries := make([]string, 0, len(wins)*2)
+	for _, win := range wins {
+		summary := availableWindowText(win)
+		entries = append(entries, "• "+summary)
+		for _, detail := range availabilityWindowDetailTexts(win) {
+			entries = append(entries, "  - "+detail)
+		}
+	}
+	return wrapListLines(ctx, entries, width)
+}
+
+func availableWindowText(win icsparse.AvailableWindow) string {
+	parts := []string{}
+	if win.Start != nil || win.End != nil {
+		start := formatDateTime(win.Start)
+		end := formatDateTime(win.End)
+		if start != "" && end != "" {
+			parts = append(parts, fmt.Sprintf("%s → %s", start, end))
+		} else if start != "" {
+			parts = append(parts, "Starts "+start)
+		} else if end != "" {
+			parts = append(parts, "Ends "+end)
+		}
+	}
+	if win.Duration != nil && *win.Duration != "" {
+		parts = append(parts, "Duration "+*win.Duration)
+	}
+	if win.Recurrence != nil {
+		rec := win.Recurrence
+		if rec.RRule != nil && *rec.RRule != "" {
+			parts = append(parts, "RRULE="+*rec.RRule)
+		}
+		if len(rec.RDates) > 0 {
+			parts = append(parts, fmt.Sprintf("RDATE count=%d", len(rec.RDates)))
+		}
+		if len(rec.ExDates) > 0 {
+			parts = append(parts, fmt.Sprintf("EXDATE count=%d", len(rec.ExDates)))
+		}
+	}
+	if len(parts) == 0 {
+		parts = append(parts, "Available window")
+	}
+	return strings.Join(parts, " | ")
+}
+
+func availabilityWindowDetailTexts(win icsparse.AvailableWindow) []string {
+	lines := []string{}
+	if win.Location != nil && strings.TrimSpace(*win.Location) != "" {
+		lines = append(lines, "Location: "+strings.TrimSpace(*win.Location))
+	}
+	if len(win.Contacts) > 0 {
+		for _, c := range win.Contacts {
+			c = strings.TrimSpace(c)
+			if c != "" {
+				lines = append(lines, "Contact: "+c)
+			}
+		}
+	}
+	if len(win.Categories) > 0 {
+		lines = append(lines, "Categories: "+strings.Join(win.Categories, ", "))
+	}
+	return lines
+}
+
+func availabilityInfoLines(av icsparse.AvailabilityInfo) []string {
+	lines := make([]string, 0, 8)
+	if av.BusyType != nil && *av.BusyType != "" {
+		lines = append(lines, "Busy: "+*av.BusyType)
+	}
+	if av.Start != nil {
+		lines = append(lines, "Start: "+formatDateTime(av.Start))
+	}
+	if av.End != nil {
+		lines = append(lines, "End: "+formatDateTime(av.End))
+	}
+	if av.Duration != nil && *av.Duration != "" {
+		lines = append(lines, "Duration: "+*av.Duration)
+	}
+	if av.Location != nil && *av.Location != "" {
+		lines = append(lines, "Location: "+cleanText(*av.Location))
+	}
+	if av.Organizer != nil && *av.Organizer != "" {
+		lines = append(lines, "Organizer: "+cleanText(*av.Organizer))
+	}
+	if av.URL != nil && *av.URL != "" {
+		lines = append(lines, "URL: "+*av.URL)
+	}
+	if len(av.Contacts) > 0 {
+		for _, c := range av.Contacts {
+			c = strings.TrimSpace(c)
+			if c != "" {
+				lines = append(lines, "Contact: "+c)
+			}
+		}
+	}
+	if len(av.Categories) > 0 {
+		lines = append(lines, "Categories: "+strings.Join(av.Categories, ", "))
+	}
+	for _, slot := range av.Available {
+		lines = append(lines, "Slot: "+availableWindowText(slot))
+		for _, detail := range availabilityWindowDetailTexts(slot) {
+			lines = append(lines, "  "+detail)
+		}
+	}
+	return lines
+}
+
+func buildJournalLayouts(journals []icsparse.JournalInfo, width int) []inviteEventLayout {
+	if len(journals) == 0 {
+		return nil
+	}
+	contentWidth := float64(width) - 2*invitePad
+	if contentWidth < 200 {
+		contentWidth = 200
+	}
+	valueWidth := contentWidth - inviteLabelWidth - inviteLabelPadding
+	if valueWidth < 140 {
+		valueWidth = 140
+	}
+	descWidth := contentWidth - inviteDescPadding*2
+	if descWidth < 140 {
+		descWidth = 140
+	}
+	headerTextWidth := contentWidth - (inviteHeaderPadX*2 + inviteIconSize + inviteIconGap)
+	if headerTextWidth < 140 {
+		headerTextWidth = 140
+	}
+
+	ctx := gg.NewContext(width, 100)
+	titleFace := loadFontFace("", inviteTitleSize)
+	textFace := loadFontFace("", inviteTextSize)
+
+	layouts := make([]inviteEventLayout, 0, len(journals))
+
+	for _, jn := range journals {
+		var layout inviteEventLayout
+		summary := strings.TrimSpace(jn.Summary)
+		if summary == "" {
+			summary = "Journal Entry"
+		}
+		ctx.SetFontFace(titleFace)
+		layout.summaryLines = ctx.WordWrap(summary, headerTextWidth)
+		if len(layout.summaryLines) == 0 {
+			layout.summaryLines = []string{summary}
+		}
+		titleHeight := inviteHeaderLineH * float64(len(layout.summaryLines))
+		layout.headerHeight = math.Max(inviteIconSize, titleHeight) + inviteHeaderPadY*2
+
+		ctx.SetFontFace(textFace)
+		addField := func(label string, lines []string) []inviteField {
+			filtered := filterLines(lines, false)
+			if len(filtered) == 0 {
+				return nil
+			}
+			height := inviteLineHeight * float64(len(filtered))
+			if height < inviteLineHeight {
+				height = inviteLineHeight
+			}
+			return []inviteField{{label: label, lines: filtered, height: height}}
+		}
+
+		fields := make([]inviteField, 0, 16)
+		if jn.DTStart != nil {
+			fields = append(fields, addField("Date:", []string{formatDateTime(jn.DTStart)})...)
+		}
+		if jn.Organizer != nil && *jn.Organizer != "" {
+			fields = append(fields, addField("Organizer:", wordWrapWithSmartURLs(ctx, cleanText(*jn.Organizer), valueWidth))...)
+		}
+		if jn.Status != nil && *jn.Status != "" {
+			fields = append(fields, addField("Status:", []string{*jn.Status})...)
+		}
+		if jn.Class != nil && *jn.Class != "" {
+			fields = append(fields, addField("Class:", []string{*jn.Class})...)
+		}
+		if len(jn.Categories) > 0 {
+			fields = append(fields, addField("Categories:", wordWrapWithSmartURLs(ctx, strings.Join(jn.Categories, ", "), valueWidth))...)
+		}
+		if contacts := bulletListLines(ctx, jn.Contacts, valueWidth); len(contacts) > 0 {
+			fields = append(fields, addField("Contacts:", contacts)...)
+		}
+		if related := bulletListLines(ctx, jn.RelatedTo, valueWidth); len(related) > 0 {
+			fields = append(fields, addField("Related To:", related)...)
+		}
+		if jn.URL != nil && *jn.URL != "" {
+			fields = append(fields, addField("URL:", wordWrapWithSmartURLs(ctx, *jn.URL, valueWidth))...)
+		}
+		if jn.DateTimeStamp != nil {
+			fields = append(fields, addField("Timestamp:", []string{formatDateTime(jn.DateTimeStamp)})...)
+		}
+		if jn.Created != nil {
+			fields = append(fields, addField("Created:", []string{formatDateTime(jn.Created)})...)
+		}
+		if jn.LastModified != nil {
+			fields = append(fields, addField("Last Modified:", []string{formatDateTime(jn.LastModified)})...)
+		}
+		if rec := recurrenceLines(ctx, jn.Recurrence, valueWidth); len(rec) > 0 {
+			fields = append(fields, addField("Recurrence:", rec)...)
+		}
+		if lines := attendeeLines(ctx, jn.Attendees, valueWidth); len(lines) > 0 {
+			fields = append(fields, addField("Attendees:", lines)...)
+		}
+		if images := imageLines(ctx, jn.Images, valueWidth); len(images) > 0 {
+			fields = append(fields, addField("Images:", images)...)
+		}
+		if conf := conferenceLines(ctx, jn.Conferences, valueWidth); len(conf) > 0 {
+			fields = append(fields, addField("Conference:", conf)...)
+		}
+		if len(jn.Attachments) > 0 {
+			entries := make([]string, 0, len(jn.Attachments))
+			for _, att := range jn.Attachments {
+				entries = append(entries, "• "+chipLabel(att))
+			}
+			fields = append(fields, addField("Attachments:", wrapListLines(ctx, entries, valueWidth))...)
+		}
+		if urls := urlListLines(ctx, jn.DiscoveredURLs, valueWidth); len(urls) > 0 {
+			fields = append(fields, addField("Referenced URLs:", urls)...)
+		}
+
+		layout.fields = fields
+		if len(fields) > 0 {
+			height := 0.0
+			for idx, f := range fields {
+				height += f.height
+				if idx < len(fields)-1 {
+					height += inviteFieldSpacing
+				}
+			}
+			layout.fieldsHeight = height
+		}
+
+		desc := ""
+		if jn.DescriptionHTML != nil && *jn.DescriptionHTML != "" {
+			desc = icsparse.PlainTextFromHTML(*jn.DescriptionHTML)
+		} else if jn.Description != nil {
+			desc = cleanText(*jn.Description)
+		}
+		if strings.TrimSpace(desc) != "" {
+			descLines := wordWrapWithSmartURLs(ctx, desc, descWidth)
+			layout.descLines = filterLines(descLines, true)
+			if len(layout.descLines) > 0 {
+				layout.descHeight = inviteDescPadding*2 + inviteLineHeight*float64(len(layout.descLines))
+				layout.hasDescription = true
+			}
+		}
+
+		height := layout.headerHeight + inviteHeaderMargin
+		if len(layout.fields) > 0 {
+			height += layout.fieldsHeight
+			if layout.hasDescription {
+				height += inviteSectionSpacing
+			}
+		}
+		if layout.hasDescription {
+			height += layout.descHeight
+		}
+		layout.totalHeight = height
+		layouts = append(layouts, layout)
+	}
+
+	return layouts
+}
+
+func journalInfoLines(jn icsparse.JournalInfo) []string {
+	lines := make([]string, 0, 16)
+	if jn.DTStart != nil {
+		lines = append(lines, "Date: "+formatDateTime(jn.DTStart))
+	}
+	if jn.Organizer != nil && *jn.Organizer != "" {
+		lines = append(lines, "Organizer: "+cleanText(*jn.Organizer))
+	}
+	if jn.Status != nil && *jn.Status != "" {
+		lines = append(lines, "Status: "+*jn.Status)
+	}
+	if jn.Class != nil && *jn.Class != "" {
+		lines = append(lines, "Class: "+*jn.Class)
+	}
+	if len(jn.Categories) > 0 {
+		lines = append(lines, "Categories: "+strings.Join(jn.Categories, ", "))
+	}
+	for _, c := range jn.Contacts {
+		c = strings.TrimSpace(c)
+		if c != "" {
+			lines = append(lines, "Contact: "+c)
+		}
+	}
+	for _, rel := range jn.RelatedTo {
+		rel = strings.TrimSpace(rel)
+		if rel != "" {
+			lines = append(lines, "Related: "+rel)
+		}
+	}
+	if jn.URL != nil && *jn.URL != "" {
+		lines = append(lines, "URL: "+*jn.URL)
+	}
+	for _, u := range jn.DiscoveredURLs {
+		u = strings.TrimSpace(u)
+		if u != "" {
+			lines = append(lines, "Referenced: "+u)
+		}
+	}
+	if jn.DateTimeStamp != nil {
+		lines = append(lines, "Timestamp: "+formatDateTime(jn.DateTimeStamp))
+	}
+	if jn.Created != nil {
+		lines = append(lines, "Created: "+formatDateTime(jn.Created))
+	}
+	if jn.LastModified != nil {
+		lines = append(lines, "Last Modified: "+formatDateTime(jn.LastModified))
+	}
+	if jn.Recurrence != nil && jn.Recurrence.RRule != nil && *jn.Recurrence.RRule != "" {
+		lines = append(lines, "RRULE: "+*jn.Recurrence.RRule)
+	}
+	if len(jn.Conferences) > 0 {
+		entries := conferenceSummariesForPNG(jn.Conferences)
+		lines = append(lines, entries...)
+	}
+	if len(jn.Attendees) > 0 {
+		for _, att := range jn.Attendees {
+			lines = append(lines, formatAttendeeDisplay(att))
+		}
+	}
+	if len(jn.Attachments) > 0 {
+		for _, att := range jn.Attachments {
+			lines = append(lines, chipLabel(att))
+		}
+	}
+	if len(jn.Images) > 0 {
+		for _, img := range jn.Images {
+			lines = append(lines, imageSummaryText(img))
+		}
+	}
+	return lines
+}
+
+func calculateLayoutsHeight(layouts []inviteEventLayout) float64 {
+	if len(layouts) == 0 {
+		return invitePad * 2
+	}
+	total := 0.0
+	for i, layout := range layouts {
+		total += layout.totalHeight
+		if i < len(layouts)-1 {
+			total += inviteEventSpacing
+		}
+	}
+	return total + invitePad*2
+}
+
 func wrapListLines(dc *gg.Context, entries []string, width float64) []string {
 	if len(entries) == 0 {
 		return nil
@@ -718,6 +1566,71 @@ func wrapListLines(dc *gg.Context, entries []string, width float64) []string {
 		lines = append(lines, wrapped...)
 	}
 	return filterLines(lines, false)
+}
+
+func bulletListLines(dc *gg.Context, entries []string, width float64) []string {
+	if len(entries) == 0 {
+		return nil
+	}
+	items := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		items = append(items, "• "+entry)
+	}
+	return wrapListLines(dc, items, width)
+}
+
+func imageSummaryText(img icsparse.ImageInfo) string {
+	parts := []string{}
+	source := strings.ToLower(strings.TrimSpace(img.Source))
+	if source == "" {
+		source = "unknown"
+	}
+	parts = append(parts, "source="+source)
+	if img.FmtType != nil && *img.FmtType != "" {
+		parts = append(parts, "type="+*img.FmtType)
+	}
+	if img.Display != nil && *img.Display != "" {
+		parts = append(parts, "display="+*img.Display)
+	}
+	if img.AltRep != nil && *img.AltRep != "" {
+		parts = append(parts, "altrep="+*img.AltRep)
+	}
+	val := strings.TrimSpace(img.Value)
+	if val != "" {
+		if len(val) > 80 {
+			val = val[:77] + "..."
+		}
+		parts = append(parts, "value="+val)
+	}
+	return strings.Join(parts, "; ")
+}
+
+func imageLines(dc *gg.Context, images []icsparse.ImageInfo, width float64) []string {
+	if len(images) == 0 {
+		return nil
+	}
+	items := make([]string, 0, len(images))
+	for _, img := range images {
+		items = append(items, "• "+imageSummaryText(img))
+	}
+	return wrapListLines(dc, items, width)
+}
+
+func geoLines(dc *gg.Context, geo *icsparse.GeoPoint, width float64) []string {
+	if geo == nil {
+		return nil
+	}
+	coords := fmt.Sprintf("• Coordinates: %.4f, %.4f", geo.Latitude, geo.Longitude)
+	mapURL := fmt.Sprintf("• https://maps.google.com/?q=%f,%f", geo.Latitude, geo.Longitude)
+	return wrapListLines(dc, []string{coords, mapURL}, width)
+}
+
+func requestStatusLines(dc *gg.Context, statuses []string, width float64) []string {
+	return bulletListLines(dc, statuses, width)
 }
 
 func filterLines(lines []string, keepEmpty bool) []string {
@@ -811,6 +1724,15 @@ func conferenceLines(ctx *gg.Context, confs []icsparse.ConferenceInfo, width flo
 		}
 	}
 	return wrapListLines(ctx, entries, width)
+}
+
+func conferenceSummariesForPNG(confs []icsparse.ConferenceInfo) []string {
+	if len(confs) == 0 {
+		return nil
+	}
+	ctx := gg.NewContext(1, 1)
+	ctx.SetFontFace(loadFontFace("", inviteTextSize))
+	return conferenceLines(ctx, confs, 220)
 }
 
 func recurrenceLines(ctx *gg.Context, rec *icsparse.RecurrenceInfo, width float64) []string {
@@ -930,6 +1852,34 @@ func formatAttendeeDisplay(att icsparse.Attendee) string {
 	}
 	if att.RSVP != nil && *att.RSVP != "" {
 		name += " [RSVP " + *att.RSVP + "]"
+	}
+	extra := make([]string, 0, 6)
+	if att.Role != nil && *att.Role != "" {
+		extra = append(extra, "role="+*att.Role)
+	}
+	if att.Cutype != nil && *att.Cutype != "" {
+		extra = append(extra, "type="+*att.Cutype)
+	}
+	if att.SentBy != nil && *att.SentBy != "" {
+		extra = append(extra, "sent-by="+*att.SentBy)
+	}
+	if len(att.DelegatedFrom) > 0 {
+		extra = append(extra, "delegated-from="+strings.Join(att.DelegatedFrom, ", "))
+	}
+	if len(att.DelegatedTo) > 0 {
+		extra = append(extra, "delegated-to="+strings.Join(att.DelegatedTo, ", "))
+	}
+	if len(att.Member) > 0 {
+		extra = append(extra, "member="+strings.Join(att.Member, ", "))
+	}
+	if att.Directory != nil && *att.Directory != "" {
+		extra = append(extra, "dir="+*att.Directory)
+	}
+	if att.Language != nil && *att.Language != "" {
+		extra = append(extra, "lang="+*att.Language)
+	}
+	if len(extra) > 0 {
+		name += " [" + strings.Join(extra, "; ") + "]"
 	}
 	return name
 }

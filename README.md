@@ -4,17 +4,17 @@
 `ics-ics-baby` is a CLI workbench for tearing apart suspicious calendar invites. It parses `.ics` payloads, extracts everything useful (events, tasks, free/busy, attachments, vcards), and emits:
 
 - a JSON manifest summarising the invite
-- an HTML preview suitable for quick eyeballing
-- a PNG rendering for embedding into reports or tickets
+- an HTML preview suitable for quick eyeballing (now including calendar branding, attendee badges, published availability, and inline image metadata)
+- a PNG rendering for embedding into reports or tickets with matching colour accents and context chips
 - any attachments referenced by the calendar item
 
 Security-oriented heuristics drive the renderer: descriptions are normalised for readability, rich HTML is sanitised before display, and conference/URL metadata is preserved for downstream tooling.
 
 ## Features
 
-- **Full RFC 5545 coverage**: events, todos, free/busy, alarms, timezones, `X-*` vendor properties, and vCards.
+- **Full RFC 5545 coverage**: events, todos, journals, free/busy, alarms, timezones, `X-*` vendor properties, and vCards.
 - **Dual description handling**: both plain `DESCRIPTION` text and `X-ALT-DESC` HTML are captured and exposed as `description` / `description_html`.
-- **Renderer parity**: HTML and PNG previews share the same sanitised content and annotate attendees, organisers, alarms, recurrence, attachments, and discovered URLs.
+- **Renderer parity**: HTML and PNG previews share sanitised content and now highlight attendee delegation metadata, calendar-defined colours, image assets, and availability windows alongside organisers, recurrence, attachments, and discovered URLs.
 - **Attachment extraction**: inline base64 blobs (including vCards) and remote links are saved into the output directory.
 - **URL harvesting**: every description/todo body is scanned for URLs and surfaced in the manifest.
 

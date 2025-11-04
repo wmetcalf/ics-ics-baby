@@ -20,6 +20,20 @@ func ensureTodoRecurrence(todo *TodoInfo) *RecurrenceInfo {
 	return todo.Recurrence
 }
 
+func ensureAvailableRecurrence(win *AvailableWindow) *RecurrenceInfo {
+	if win.Recurrence == nil {
+		win.Recurrence = &RecurrenceInfo{}
+	}
+	return win.Recurrence
+}
+
+func ensureJournalRecurrence(journal *JournalInfo) *RecurrenceInfo {
+	if journal.Recurrence == nil {
+		journal.Recurrence = &RecurrenceInfo{}
+	}
+	return journal.Recurrence
+}
+
 func copyParams(params map[string]string) map[string]string {
 	if len(params) == 0 {
 		return nil
@@ -29,6 +43,17 @@ func copyParams(params map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+func addRawProp(props map[string][]string, key, value string) map[string][]string {
+	if value == "" {
+		return props
+	}
+	if props == nil {
+		props = make(map[string][]string)
+	}
+	props[key] = append(props[key], value)
+	return props
 }
 
 func parseICSMultiDates(value string, params map[string]string, locDefault *time.Location) (times []time.Time, raw []string) {
@@ -57,8 +82,48 @@ func parseInt(value string) (*int, bool) {
 	return nil, false
 }
 
+func parseGeo(value string) (*GeoPoint, bool) {
+	parts := strings.SplitN(strings.TrimSpace(value), ";", 2)
+	if len(parts) != 2 {
+		return nil, false
+	}
+	lat, err := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	if err != nil {
+		return nil, false
+	}
+	lon, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	if err != nil {
+		return nil, false
+	}
+	return &GeoPoint{Latitude: lat, Longitude: lon}, true
+}
+
+func parseImage(value string, params map[string]string) ImageInfo {
+	enc := strings.ToUpper(params["ENCODING"])
+	valType := strings.ToUpper(params["VALUE"])
+	fmtType := strings.TrimSpace(trimQuotes(params["FMTTYPE"]))
+	display := strings.TrimSpace(trimQuotes(params["DISPLAY"]))
+	altrep := strings.TrimSpace(trimQuotes(params["ALTREP"]))
+	info := ImageInfo{Source: "uri"}
+	if enc == "BASE64" || valType == "BINARY" {
+		clean := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(value, "\n", ""), "\r", ""), " ", "")
+		info.Source = "binary"
+		info.Value = clean
+	} else {
+		decoded := strings.TrimSpace(unescapeICSText(value))
+		info.Value = decoded
+		if strings.HasPrefix(strings.ToLower(decoded), "data:") {
+			info.Source = "data"
+		}
+	}
+	info.FmtType = nz(fmtType)
+	info.Display = nz(display)
+	info.AltRep = nz(altrep)
+	return info
+}
+
 func parseValarm(lines []string, start int, locDefault *time.Location) (AlarmInfo, int) {
-	alarm := AlarmInfo{RawProps: map[string]string{}}
+	alarm := AlarmInfo{RawProps: map[string][]string{}}
 	for i := start + 1; i < len(lines); i++ {
 		line := lines[i]
 		upper := strings.ToUpper(line)
@@ -111,9 +176,7 @@ func parseValarm(lines []string, start int, locDefault *time.Location) (AlarmInf
 		case "ATTENDEE":
 			alarm.Attendees = append(alarm.Attendees, parseAttendee(value, params))
 		default:
-			if value != "" {
-				alarm.RawProps[up] = value
-			}
+			alarm.RawProps = addRawProp(alarm.RawProps, up, value)
 		}
 	}
 	if len(alarm.RawProps) == 0 {
@@ -123,7 +186,7 @@ func parseValarm(lines []string, start int, locDefault *time.Location) (AlarmInf
 }
 
 func parseVTimezone(lines []string, start int, locDefault *time.Location) (TimezoneInfo, int) {
-	tz := TimezoneInfo{RawProps: map[string]string{}}
+	tz := TimezoneInfo{RawProps: map[string][]string{}}
 	for i := start + 1; i < len(lines); i++ {
 		line := lines[i]
 		upper := strings.ToUpper(line)
@@ -161,9 +224,7 @@ func parseVTimezone(lines []string, start int, locDefault *time.Location) (Timez
 				tz.URL = ptr(value)
 			}
 		default:
-			if value != "" {
-				tz.RawProps[up] = value
-			}
+			tz.RawProps = addRawProp(tz.RawProps, up, value)
 		}
 	}
 	if len(tz.RawProps) == 0 {
@@ -173,7 +234,7 @@ func parseVTimezone(lines []string, start int, locDefault *time.Location) (Timez
 }
 
 func parseTimezonePeriod(lines []string, start int, locDefault *time.Location, typ string) (TimezonePeriod, int) {
-	period := TimezonePeriod{Type: typ, RawProps: map[string]string{}}
+	period := TimezonePeriod{Type: typ, RawProps: map[string][]string{}}
 	for i := start + 1; i < len(lines); i++ {
 		line := lines[i]
 		upper := strings.ToUpper(line)
@@ -207,15 +268,237 @@ func parseTimezonePeriod(lines []string, start int, locDefault *time.Location, t
 				period.RRule = ptr(value)
 			}
 		default:
-			if value != "" {
-				period.RawProps[up] = value
-			}
+			period.RawProps = addRawProp(period.RawProps, up, value)
 		}
 	}
 	if len(period.RawProps) == 0 {
 		period.RawProps = nil
 	}
 	return period, len(lines) - 1
+}
+
+func parseAvailableWindow(lines []string, start int, locDefault *time.Location) (AvailableWindow, int) {
+	window := AvailableWindow{RawProps: map[string][]string{}, Categories: []string{}, Contacts: []string{}}
+	desc := descriptionCapture{}
+	for i := start + 1; i < len(lines); i++ {
+		line := lines[i]
+		upper := strings.ToUpper(line)
+		if strings.HasPrefix(upper, "END:AVAILABLE") {
+			if desc.hasPlain {
+				window.Description = ptr(desc.plain)
+			}
+			if desc.hasHTML {
+				window.DescriptionHTML = ptr(desc.html)
+			}
+			if len(window.RawProps) == 0 {
+				window.RawProps = nil
+			}
+			return window, i
+		}
+		name, params, value := splitProp(line)
+		up := strings.ToUpper(name)
+		switch up {
+		case "UID":
+			if value != "" {
+				val := strings.TrimSpace(unescapeICSText(value))
+				if val != "" {
+					window.UID = ptr(val)
+				}
+			}
+		case "SUMMARY":
+			if value != "" {
+				val := strings.TrimSpace(unescapeICSText(value))
+				if val != "" {
+					window.Summary = ptr(val)
+				}
+			}
+		case "DESCRIPTION":
+			desc.absorbDescription(value)
+		case "X-ALT-DESC":
+			desc.absorbAltDescription(value, params)
+		case "LOCATION":
+			loc := strings.TrimSpace(unescapeICSText(value))
+			if loc != "" {
+				window.Location = ptr(loc)
+			}
+		case "CATEGORIES":
+			parts := splitEscaped(value, ',', false)
+			for _, p := range parts {
+				p = strings.TrimSpace(unescapeICSText(p))
+				if p != "" {
+					window.Categories = append(window.Categories, p)
+				}
+			}
+		case "CONTACT":
+			contact := strings.TrimSpace(unescapeICSText(value))
+			if contact != "" {
+				window.Contacts = append(window.Contacts, contact)
+			}
+		case "DTSTART":
+			if t, ok := parseICSTime(value, params, locDefault); ok {
+				window.Start = &t
+			}
+		case "DTEND":
+			if t, ok := parseICSTime(value, params, locDefault); ok {
+				window.End = &t
+			}
+		case "DURATION":
+			if value != "" {
+				window.Duration = ptr(value)
+			}
+		case "RRULE":
+			rec := ensureAvailableRecurrence(&window)
+			rec.RRule = ptr(value)
+		case "RDATE":
+			rec := ensureAvailableRecurrence(&window)
+			times, rawVals := parseICSMultiDates(value, params, locDefault)
+			if len(times) > 0 {
+				rec.RDates = append(rec.RDates, times...)
+			}
+			if len(rawVals) > 0 {
+				rec.RDateRaw = append(rec.RDateRaw, rawVals...)
+			}
+		case "EXDATE":
+			rec := ensureAvailableRecurrence(&window)
+			times, rawVals := parseICSMultiDates(value, params, locDefault)
+			if len(times) > 0 {
+				rec.ExDates = append(rec.ExDates, times...)
+			}
+			if len(rawVals) > 0 {
+				rec.ExDateRaw = append(rec.ExDateRaw, rawVals...)
+			}
+		case "RECURRENCE-ID":
+			rec := ensureAvailableRecurrence(&window)
+			if t, ok := parseICSTime(value, params, locDefault); ok {
+				rec.RecurrenceID = &t
+			} else if value != "" {
+				rec.RecurrenceIDRaw = ptr(value)
+			}
+		default:
+			window.RawProps = addRawProp(window.RawProps, up, value)
+		}
+	}
+	if len(window.RawProps) == 0 {
+		window.RawProps = nil
+	}
+	return window, len(lines) - 1
+}
+
+func parseAvailability(lines []string, start int, locDefault *time.Location) (AvailabilityInfo, int) {
+	availability := AvailabilityInfo{RawProps: map[string][]string{}, Categories: []string{}, Contacts: []string{}, Available: []AvailableWindow{}}
+	desc := descriptionCapture{}
+	for i := start + 1; i < len(lines); i++ {
+		line := lines[i]
+		upper := strings.ToUpper(line)
+		switch {
+		case strings.HasPrefix(upper, "BEGIN:AVAILABLE"):
+			window, endIdx := parseAvailableWindow(lines, i, locDefault)
+			availability.Available = append(availability.Available, window)
+			i = endIdx
+			continue
+		case strings.HasPrefix(upper, "END:VAVAILABILITY"):
+			if desc.hasPlain {
+				availability.Description = ptr(desc.plain)
+			}
+			if desc.hasHTML {
+				availability.DescriptionHTML = ptr(desc.html)
+			}
+			if len(availability.RawProps) == 0 {
+				availability.RawProps = nil
+			}
+			return availability, i
+		}
+		name, params, value := splitProp(line)
+		up := strings.ToUpper(name)
+		switch up {
+		case "UID":
+			if value != "" {
+				val := strings.TrimSpace(unescapeICSText(value))
+				if val != "" {
+					availability.UID = ptr(val)
+				}
+			}
+		case "SUMMARY":
+			if value != "" {
+				val := strings.TrimSpace(unescapeICSText(value))
+				if val != "" {
+					availability.Summary = ptr(val)
+				}
+			}
+		case "DESCRIPTION":
+			desc.absorbDescription(value)
+		case "X-ALT-DESC":
+			desc.absorbAltDescription(value, params)
+		case "ORGANIZER":
+			if value != "" {
+				availability.Organizer = ptr(value)
+			}
+		case "BUSYTYPE":
+			if value != "" {
+				availability.BusyType = ptr(value)
+			}
+		case "CATEGORIES":
+			parts := splitEscaped(value, ',', false)
+			for _, p := range parts {
+				p = strings.TrimSpace(unescapeICSText(p))
+				if p != "" {
+					availability.Categories = append(availability.Categories, p)
+				}
+			}
+		case "CONTACT":
+			contact := strings.TrimSpace(unescapeICSText(value))
+			if contact != "" {
+				availability.Contacts = append(availability.Contacts, contact)
+			}
+		case "URL":
+			if value != "" {
+				availability.URL = ptr(value)
+			}
+		case "LOCATION":
+			loc := strings.TrimSpace(unescapeICSText(value))
+			if loc != "" {
+				availability.Location = ptr(loc)
+			}
+		case "PRIORITY":
+			if n, ok := parseInt(value); ok {
+				availability.Priority = n
+			}
+		case "SEQUENCE":
+			if n, ok := parseInt(value); ok {
+				availability.Sequence = n
+			}
+		case "CREATED":
+			if t, ok := parseICSTime(value, params, locDefault); ok {
+				availability.Created = &t
+			}
+		case "LAST-MODIFIED":
+			if t, ok := parseICSTime(value, params, locDefault); ok {
+				availability.LastModified = &t
+			}
+		case "DTSTAMP":
+			if t, ok := parseICSTime(value, params, locDefault); ok {
+				availability.DateTimeStamp = &t
+			}
+		case "DTSTART":
+			if t, ok := parseICSTime(value, params, locDefault); ok {
+				availability.Start = &t
+			}
+		case "DTEND":
+			if t, ok := parseICSTime(value, params, locDefault); ok {
+				availability.End = &t
+			}
+		case "DURATION":
+			if value != "" {
+				availability.Duration = ptr(value)
+			}
+		default:
+			availability.RawProps = addRawProp(availability.RawProps, up, value)
+		}
+	}
+	if len(availability.RawProps) == 0 {
+		availability.RawProps = nil
+	}
+	return availability, len(lines) - 1
 }
 
 func parseFreeBusyPeriods(value string, params map[string]string, locDefault *time.Location) []FreeBusyPeriod {

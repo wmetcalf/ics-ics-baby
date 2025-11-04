@@ -19,11 +19,18 @@ import (
 )
 
 type Attendee struct {
-	Mailto   string  `json:"mailto,omitempty"`
-	CN       *string `json:"cn,omitempty"`
-	Role     *string `json:"role,omitempty"`
-	PartStat *string `json:"partstat,omitempty"`
-	RSVP     *string `json:"rsvp,omitempty"`
+	Mailto        string   `json:"mailto,omitempty"`
+	CN            *string  `json:"cn,omitempty"`
+	Role          *string  `json:"role,omitempty"`
+	PartStat      *string  `json:"partstat,omitempty"`
+	RSVP          *string  `json:"rsvp,omitempty"`
+	Cutype        *string  `json:"cutype,omitempty"`
+	SentBy        *string  `json:"sent_by,omitempty"`
+	Directory     *string  `json:"directory,omitempty"`
+	Language      *string  `json:"language,omitempty"`
+	DelegatedFrom []string `json:"delegated_from,omitempty"`
+	DelegatedTo   []string `json:"delegated_to,omitempty"`
+	Member        []string `json:"member,omitempty"`
 }
 
 type AttachmentInfo struct {
@@ -40,136 +47,229 @@ type AttachmentInfo struct {
 }
 
 type EventInfo struct {
-	DiscoveredURLs  []string          `json:"discovered_urls,omitempty"`
-	UID             *string           `json:"uid,omitempty"`
-	Summary         string            `json:"summary"`
-	DTStart         *time.Time        `json:"dtstart,omitempty"`
-	DTEnd           *time.Time        `json:"dtend,omitempty"`
-	Location        *string           `json:"location,omitempty"`
-	Description     *string           `json:"description,omitempty"`
-	DescriptionHTML *string           `json:"description_html,omitempty"`
-	Organizer       *string           `json:"organizer,omitempty"`
-	Status          *string           `json:"status,omitempty"`
-	Attendees       []Attendee        `json:"attendees,omitempty"`
-	Attachments     []AttachmentInfo  `json:"attachments"`
-	VCards          []VCard           `json:"vcards,omitempty"`
-	Alarms          []AlarmInfo       `json:"alarms,omitempty"`
-	Categories      []string          `json:"categories,omitempty"`
-	Resources       []string          `json:"resources,omitempty"`
-	Conferences     []ConferenceInfo  `json:"conferences,omitempty"`
-	Recurrence      *RecurrenceInfo   `json:"recurrence,omitempty"`
-	Transparency    *string           `json:"transparency,omitempty"`
-	Priority        *int              `json:"priority,omitempty"`
-	Class           *string           `json:"class,omitempty"`
-	URL             *string           `json:"url,omitempty"`
-	Created         *time.Time        `json:"created,omitempty"`
-	LastModified    *time.Time        `json:"last_modified,omitempty"`
-	DateTimeStamp   *time.Time        `json:"dtstamp,omitempty"`
-	Sequence        *int              `json:"sequence,omitempty"`
-	Duration        *string           `json:"duration,omitempty"`
-	RawProps        map[string]string `json:"raw_props"`
+	DiscoveredURLs  []string            `json:"discovered_urls,omitempty"`
+	UID             *string             `json:"uid,omitempty"`
+	Summary         string              `json:"summary"`
+	DTStart         *time.Time          `json:"dtstart,omitempty"`
+	DTEnd           *time.Time          `json:"dtend,omitempty"`
+	Location        *string             `json:"location,omitempty"`
+	Description     *string             `json:"description,omitempty"`
+	DescriptionHTML *string             `json:"description_html,omitempty"`
+	Organizer       *string             `json:"organizer,omitempty"`
+	Status          *string             `json:"status,omitempty"`
+	Attendees       []Attendee          `json:"attendees,omitempty"`
+	Attachments     []AttachmentInfo    `json:"attachments"`
+	VCards          []VCard             `json:"vcards,omitempty"`
+	Alarms          []AlarmInfo         `json:"alarms,omitempty"`
+	Categories      []string            `json:"categories,omitempty"`
+	Resources       []string            `json:"resources,omitempty"`
+	Contacts        []string            `json:"contacts,omitempty"`
+	Comments        []string            `json:"comments,omitempty"`
+	RelatedTo       []string            `json:"related_to,omitempty"`
+	RequestStatuses []string            `json:"request_statuses,omitempty"`
+	Images          []ImageInfo         `json:"images,omitempty"`
+	Conferences     []ConferenceInfo    `json:"conferences,omitempty"`
+	Recurrence      *RecurrenceInfo     `json:"recurrence,omitempty"`
+	Transparency    *string             `json:"transparency,omitempty"`
+	Priority        *int                `json:"priority,omitempty"`
+	Class           *string             `json:"class,omitempty"`
+	Color           *string             `json:"color,omitempty"`
+	Geo             *GeoPoint           `json:"geo,omitempty"`
+	URL             *string             `json:"url,omitempty"`
+	Created         *time.Time          `json:"created,omitempty"`
+	LastModified    *time.Time          `json:"last_modified,omitempty"`
+	DateTimeStamp   *time.Time          `json:"dtstamp,omitempty"`
+	Sequence        *int                `json:"sequence,omitempty"`
+	Duration        *string             `json:"duration,omitempty"`
+	RawProps        map[string][]string `json:"raw_props"`
 }
 
 type CalendarInfo struct {
-	DiscoveredURLs []string       `json:"discovered_urls,omitempty"`
-	Name           *string        `json:"name,omitempty"`
-	Method         *string        `json:"method,omitempty"`
-	ProdID         *string        `json:"prodid,omitempty"`
-	Events         []EventInfo    `json:"events"`
-	VCards         []VCard        `json:"vcards,omitempty"`
-	Description    *string        `json:"description,omitempty"`
-	URL            *string        `json:"url,omitempty"`
-	Calscale       *string        `json:"calscale,omitempty"`
-	TimezoneID     *string        `json:"timezone_id,omitempty"`
-	Timezones      []TimezoneInfo `json:"timezones,omitempty"`
-	Todos          []TodoInfo     `json:"todos,omitempty"`
-	FreeBusy       []FreeBusyInfo `json:"freebusy,omitempty"`
+	DiscoveredURLs  []string           `json:"discovered_urls,omitempty"`
+	Name            *string            `json:"name,omitempty"`
+	Method          *string            `json:"method,omitempty"`
+	ProdID          *string            `json:"prodid,omitempty"`
+	Color           *string            `json:"color,omitempty"`
+	Source          *string            `json:"source,omitempty"`
+	RefreshInterval *string            `json:"refresh_interval,omitempty"`
+	Categories      []string           `json:"categories,omitempty"`
+	Contacts        []string           `json:"contacts,omitempty"`
+	Images          []ImageInfo        `json:"images,omitempty"`
+	Events          []EventInfo        `json:"events"`
+	VCards          []VCard            `json:"vcards,omitempty"`
+	Description     *string            `json:"description,omitempty"`
+	URL             *string            `json:"url,omitempty"`
+	Calscale        *string            `json:"calscale,omitempty"`
+	TimezoneID      *string            `json:"timezone_id,omitempty"`
+	Timezones       []TimezoneInfo     `json:"timezones,omitempty"`
+	Todos           []TodoInfo         `json:"todos,omitempty"`
+	FreeBusy        []FreeBusyInfo     `json:"freebusy,omitempty"`
+	Availabilities  []AvailabilityInfo `json:"availabilities,omitempty"`
+	Journals        []JournalInfo      `json:"journals,omitempty"`
 }
 
 func (c *CalendarInfo) Manifest() map[string]any {
+	calendarMeta := map[string]any{
+		"name":        c.Name,
+		"prodid":      c.ProdID,
+		"method":      c.Method,
+		"description": c.Description,
+		"url":         c.URL,
+		"calscale":    c.Calscale,
+		"timezone_id": c.TimezoneID,
+	}
+	if c.Color != nil {
+		calendarMeta["color"] = c.Color
+	}
+	if c.Source != nil {
+		calendarMeta["source"] = c.Source
+	}
+	if c.RefreshInterval != nil {
+		calendarMeta["refresh_interval"] = c.RefreshInterval
+	}
+	if len(c.Categories) > 0 {
+		calendarMeta["categories"] = c.Categories
+	}
+	if len(c.Contacts) > 0 {
+		calendarMeta["contacts"] = c.Contacts
+	}
+	if len(c.Images) > 0 {
+		calendarMeta["images"] = c.Images
+	}
 	out := map[string]any{
-		"calendar": map[string]any{
-			"name":        c.Name,
-			"prodid":      c.ProdID,
-			"method":      c.Method,
-			"description": c.Description,
-			"url":         c.URL,
-			"calscale":    c.Calscale,
-			"timezone_id": c.TimezoneID,
-		},
+		"calendar": calendarMeta,
 	}
 	type ev struct {
-		UID             *string           `json:"uid,omitempty"`
-		Summary         string            `json:"summary"`
-		DTStart         *time.Time        `json:"dtstart,omitempty"`
-		DTEnd           *time.Time        `json:"dtend,omitempty"`
-		Location        *string           `json:"location,omitempty"`
-		Description     *string           `json:"description,omitempty"`
-		DescriptionHTML *string           `json:"description_html,omitempty"`
-		Organizer       *string           `json:"organizer,omitempty"`
-		Status          *string           `json:"status,omitempty"`
-		Attendees       []Attendee        `json:"attendees,omitempty"`
-		Attachments     []AttachmentInfo  `json:"attachments"`
-		VCards          []VCard           `json:"vcards,omitempty"`
-		Alarms          []AlarmInfo       `json:"alarms,omitempty"`
-		Categories      []string          `json:"categories,omitempty"`
-		Resources       []string          `json:"resources,omitempty"`
-		Conferences     []ConferenceInfo  `json:"conferences,omitempty"`
-		Recurrence      *RecurrenceInfo   `json:"recurrence,omitempty"`
-		Transparency    *string           `json:"transparency,omitempty"`
-		Priority        *int              `json:"priority,omitempty"`
-		Class           *string           `json:"class,omitempty"`
-		URL             *string           `json:"url,omitempty"`
-		Created         *time.Time        `json:"created,omitempty"`
-		LastModified    *time.Time        `json:"last_modified,omitempty"`
-		DateTimeStamp   *time.Time        `json:"dtstamp,omitempty"`
-		Sequence        *int              `json:"sequence,omitempty"`
-		Duration        *string           `json:"duration,omitempty"`
-		RawProps        map[string]string `json:"raw_props"`
-		DiscoveredURLs  []string          `json:"discovered_urls,omitempty"`
+		UID             *string             `json:"uid,omitempty"`
+		Summary         string              `json:"summary"`
+		DTStart         *time.Time          `json:"dtstart,omitempty"`
+		DTEnd           *time.Time          `json:"dtend,omitempty"`
+		Location        *string             `json:"location,omitempty"`
+		Description     *string             `json:"description,omitempty"`
+		DescriptionHTML *string             `json:"description_html,omitempty"`
+		Organizer       *string             `json:"organizer,omitempty"`
+		Status          *string             `json:"status,omitempty"`
+		Attendees       []Attendee          `json:"attendees,omitempty"`
+		Attachments     []AttachmentInfo    `json:"attachments"`
+		VCards          []VCard             `json:"vcards,omitempty"`
+		Alarms          []AlarmInfo         `json:"alarms,omitempty"`
+		Categories      []string            `json:"categories,omitempty"`
+		Resources       []string            `json:"resources,omitempty"`
+		Contacts        []string            `json:"contacts,omitempty"`
+		Comments        []string            `json:"comments,omitempty"`
+		RelatedTo       []string            `json:"related_to,omitempty"`
+		RequestStatuses []string            `json:"request_statuses,omitempty"`
+		Images          []ImageInfo         `json:"images,omitempty"`
+		Conferences     []ConferenceInfo    `json:"conferences,omitempty"`
+		Recurrence      *RecurrenceInfo     `json:"recurrence,omitempty"`
+		Transparency    *string             `json:"transparency,omitempty"`
+		Priority        *int                `json:"priority,omitempty"`
+		Class           *string             `json:"class,omitempty"`
+		Color           *string             `json:"color,omitempty"`
+		Geo             *GeoPoint           `json:"geo,omitempty"`
+		URL             *string             `json:"url,omitempty"`
+		Created         *time.Time          `json:"created,omitempty"`
+		LastModified    *time.Time          `json:"last_modified,omitempty"`
+		DateTimeStamp   *time.Time          `json:"dtstamp,omitempty"`
+		Sequence        *int                `json:"sequence,omitempty"`
+		Duration        *string             `json:"duration,omitempty"`
+		RawProps        map[string][]string `json:"raw_props"`
+		DiscoveredURLs  []string            `json:"discovered_urls,omitempty"`
 	}
 	type td struct {
-		UID             *string           `json:"uid,omitempty"`
-		Summary         string            `json:"summary"`
-		Description     *string           `json:"description,omitempty"`
-		DescriptionHTML *string           `json:"description_html,omitempty"`
-		Location        *string           `json:"location,omitempty"`
-		Organizer       *string           `json:"organizer,omitempty"`
-		Status          *string           `json:"status,omitempty"`
-		Priority        *int              `json:"priority,omitempty"`
-		PercentComplete *int              `json:"percent_complete,omitempty"`
-		Categories      []string          `json:"categories,omitempty"`
-		Resources       []string          `json:"resources,omitempty"`
-		URL             *string           `json:"url,omitempty"`
-		Start           *time.Time        `json:"dtstart,omitempty"`
-		Due             *time.Time        `json:"due,omitempty"`
-		Completed       *time.Time        `json:"completed,omitempty"`
-		Created         *time.Time        `json:"created,omitempty"`
-		LastModified    *time.Time        `json:"last_modified,omitempty"`
-		DateTimeStamp   *time.Time        `json:"dtstamp,omitempty"`
-		Sequence        *int              `json:"sequence,omitempty"`
-		Duration        *string           `json:"duration,omitempty"`
-		Recurrence      *RecurrenceInfo   `json:"recurrence,omitempty"`
-		Attendees       []Attendee        `json:"attendees,omitempty"`
-		Attachments     []AttachmentInfo  `json:"attachments,omitempty"`
-		VCards          []VCard           `json:"vcards,omitempty"`
-		Alarms          []AlarmInfo       `json:"alarms,omitempty"`
-		RawProps        map[string]string `json:"raw_props"`
-		DiscoveredURLs  []string          `json:"discovered_urls,omitempty"`
+		UID             *string             `json:"uid,omitempty"`
+		Summary         string              `json:"summary"`
+		Description     *string             `json:"description,omitempty"`
+		DescriptionHTML *string             `json:"description_html,omitempty"`
+		Location        *string             `json:"location,omitempty"`
+		Organizer       *string             `json:"organizer,omitempty"`
+		Status          *string             `json:"status,omitempty"`
+		Priority        *int                `json:"priority,omitempty"`
+		PercentComplete *int                `json:"percent_complete,omitempty"`
+		Categories      []string            `json:"categories,omitempty"`
+		Resources       []string            `json:"resources,omitempty"`
+		Contacts        []string            `json:"contacts,omitempty"`
+		Comments        []string            `json:"comments,omitempty"`
+		RelatedTo       []string            `json:"related_to,omitempty"`
+		RequestStatuses []string            `json:"request_statuses,omitempty"`
+		Images          []ImageInfo         `json:"images,omitempty"`
+		Color           *string             `json:"color,omitempty"`
+		URL             *string             `json:"url,omitempty"`
+		Start           *time.Time          `json:"dtstart,omitempty"`
+		Due             *time.Time          `json:"due,omitempty"`
+		Completed       *time.Time          `json:"completed,omitempty"`
+		Created         *time.Time          `json:"created,omitempty"`
+		LastModified    *time.Time          `json:"last_modified,omitempty"`
+		DateTimeStamp   *time.Time          `json:"dtstamp,omitempty"`
+		Sequence        *int                `json:"sequence,omitempty"`
+		Duration        *string             `json:"duration,omitempty"`
+		Recurrence      *RecurrenceInfo     `json:"recurrence,omitempty"`
+		Attendees       []Attendee          `json:"attendees,omitempty"`
+		Attachments     []AttachmentInfo    `json:"attachments,omitempty"`
+		VCards          []VCard             `json:"vcards,omitempty"`
+		Alarms          []AlarmInfo         `json:"alarms,omitempty"`
+		RawProps        map[string][]string `json:"raw_props"`
+		DiscoveredURLs  []string            `json:"discovered_urls,omitempty"`
 	}
 	type fb struct {
-		UID         *string           `json:"uid,omitempty"`
-		Organizer   *string           `json:"organizer,omitempty"`
-		Contact     *string           `json:"contact,omitempty"`
-		URL         *string           `json:"url,omitempty"`
-		Start       *time.Time        `json:"dtstart,omitempty"`
-		End         *time.Time        `json:"dtend,omitempty"`
-		Periods     []FreeBusyPeriod  `json:"periods,omitempty"`
-		Comments    []string          `json:"comments,omitempty"`
-		VCards      []VCard           `json:"vcards,omitempty"`
-		Attendees   []Attendee        `json:"attendees,omitempty"`
-		Attachments []AttachmentInfo  `json:"attachments,omitempty"`
-		RawProps    map[string]string `json:"raw_props"`
+		UID         *string             `json:"uid,omitempty"`
+		Organizer   *string             `json:"organizer,omitempty"`
+		Contact     *string             `json:"contact,omitempty"`
+		URL         *string             `json:"url,omitempty"`
+		Start       *time.Time          `json:"dtstart,omitempty"`
+		End         *time.Time          `json:"dtend,omitempty"`
+		Periods     []FreeBusyPeriod    `json:"periods,omitempty"`
+		Comments    []string            `json:"comments,omitempty"`
+		VCards      []VCard             `json:"vcards,omitempty"`
+		Attendees   []Attendee          `json:"attendees,omitempty"`
+		Attachments []AttachmentInfo    `json:"attachments,omitempty"`
+		RawProps    map[string][]string `json:"raw_props"`
+	}
+	type av struct {
+		UID             *string             `json:"uid,omitempty"`
+		Summary         *string             `json:"summary,omitempty"`
+		Description     *string             `json:"description,omitempty"`
+		DescriptionHTML *string             `json:"description_html,omitempty"`
+		Organizer       *string             `json:"organizer,omitempty"`
+		BusyType        *string             `json:"busy_type,omitempty"`
+		Categories      []string            `json:"categories,omitempty"`
+		Contacts        []string            `json:"contacts,omitempty"`
+		URL             *string             `json:"url,omitempty"`
+		Location        *string             `json:"location,omitempty"`
+		Priority        *int                `json:"priority,omitempty"`
+		Sequence        *int                `json:"sequence,omitempty"`
+		Created         *time.Time          `json:"created,omitempty"`
+		LastModified    *time.Time          `json:"last_modified,omitempty"`
+		DateTimeStamp   *time.Time          `json:"dtstamp,omitempty"`
+		Start           *time.Time          `json:"dtstart,omitempty"`
+		End             *time.Time          `json:"dtend,omitempty"`
+		Duration        *string             `json:"duration,omitempty"`
+		Available       []AvailableWindow   `json:"available,omitempty"`
+		RawProps        map[string][]string `json:"raw_props"`
+	}
+	type jr struct {
+		UID             *string             `json:"uid,omitempty"`
+		Summary         string              `json:"summary"`
+		Description     *string             `json:"description,omitempty"`
+		DescriptionHTML *string             `json:"description_html,omitempty"`
+		DTStart         *time.Time          `json:"dtstart,omitempty"`
+		Organizer       *string             `json:"organizer,omitempty"`
+		Status          *string             `json:"status,omitempty"`
+		Class           *string             `json:"class,omitempty"`
+		Categories      []string            `json:"categories,omitempty"`
+		Contacts        []string            `json:"contacts,omitempty"`
+		RelatedTo       []string            `json:"related_to,omitempty"`
+		Conferences     []ConferenceInfo    `json:"conferences,omitempty"`
+		URL             *string             `json:"url,omitempty"`
+		DateTimeStamp   *time.Time          `json:"dtstamp,omitempty"`
+		Created         *time.Time          `json:"created,omitempty"`
+		LastModified    *time.Time          `json:"last_modified,omitempty"`
+		Recurrence      *RecurrenceInfo     `json:"recurrence,omitempty"`
+		Attendees       []Attendee          `json:"attendees,omitempty"`
+		Attachments     []AttachmentInfo    `json:"attachments,omitempty"`
+		DiscoveredURLs  []string            `json:"discovered_urls,omitempty"`
+		Images          []ImageInfo         `json:"images,omitempty"`
+		RawProps        map[string][]string `json:"raw_props"`
 	}
 	events := make([]ev, 0, len(c.Events))
 	for _, e := range c.Events {
@@ -178,9 +278,11 @@ func (c *CalendarInfo) Manifest() map[string]any {
 			Location: e.Location, Description: e.Description, DescriptionHTML: e.DescriptionHTML, Organizer: e.Organizer,
 			Status: e.Status, Attendees: e.Attendees,
 			Attachments: e.Attachments, VCards: e.VCards, Alarms: e.Alarms,
-			Categories: e.Categories, Resources: e.Resources, Conferences: e.Conferences,
-			Recurrence: e.Recurrence, Transparency: e.Transparency, Priority: e.Priority,
-			Class: e.Class, URL: e.URL, Created: e.Created, LastModified: e.LastModified,
+			Categories: e.Categories, Resources: e.Resources, Contacts: e.Contacts, Comments: e.Comments,
+			RelatedTo: e.RelatedTo, RequestStatuses: e.RequestStatuses, Images: e.Images,
+			Conferences: e.Conferences,
+			Recurrence:  e.Recurrence, Transparency: e.Transparency, Priority: e.Priority,
+			Class: e.Class, Color: e.Color, Geo: e.Geo, URL: e.URL, Created: e.Created, LastModified: e.LastModified,
 			DateTimeStamp: e.DateTimeStamp, Sequence: e.Sequence, Duration: e.Duration,
 			RawProps: e.RawProps, DiscoveredURLs: e.DiscoveredURLs,
 		})
@@ -199,7 +301,9 @@ func (c *CalendarInfo) Manifest() map[string]any {
 			items = append(items, td{
 				UID: todo.UID, Summary: todo.Summary, Description: todo.Description, DescriptionHTML: todo.DescriptionHTML, Location: todo.Location,
 				Organizer: todo.Organizer, Status: todo.Status, Priority: todo.Priority, PercentComplete: todo.PercentComplete,
-				Categories: todo.Categories, Resources: todo.Resources, URL: todo.URL, Start: todo.Start, Due: todo.Due,
+				Categories: todo.Categories, Resources: todo.Resources, Contacts: todo.Contacts, Comments: todo.Comments,
+				RelatedTo: todo.RelatedTo, RequestStatuses: todo.RequestStatuses, Images: todo.Images, Color: todo.Color,
+				URL: todo.URL, Start: todo.Start, Due: todo.Due,
 				Completed: todo.Completed, Created: todo.Created, LastModified: todo.LastModified,
 				DateTimeStamp: todo.DateTimeStamp, Sequence: todo.Sequence, Duration: todo.Duration,
 				Recurrence: todo.Recurrence, Attendees: todo.Attendees, Attachments: todo.Attachments,
@@ -220,6 +324,35 @@ func (c *CalendarInfo) Manifest() map[string]any {
 			})
 		}
 		out["freebusy"] = items
+	}
+	if len(c.Availabilities) > 0 {
+		items := make([]av, 0, len(c.Availabilities))
+		for _, availability := range c.Availabilities {
+			items = append(items, av{
+				UID: availability.UID, Summary: availability.Summary, Description: availability.Description, DescriptionHTML: availability.DescriptionHTML,
+				Organizer: availability.Organizer, BusyType: availability.BusyType, Categories: availability.Categories,
+				Contacts: availability.Contacts, URL: availability.URL, Location: availability.Location,
+				Priority: availability.Priority, Sequence: availability.Sequence, Created: availability.Created,
+				LastModified: availability.LastModified, DateTimeStamp: availability.DateTimeStamp,
+				Start: availability.Start, End: availability.End, Duration: availability.Duration,
+				Available: availability.Available, RawProps: availability.RawProps,
+			})
+		}
+		out["availabilities"] = items
+	}
+	if len(c.Journals) > 0 {
+		items := make([]jr, 0, len(c.Journals))
+		for _, journal := range c.Journals {
+			items = append(items, jr{
+				UID: journal.UID, Summary: journal.Summary, Description: journal.Description, DescriptionHTML: journal.DescriptionHTML,
+				DTStart: journal.DTStart, Organizer: journal.Organizer, Status: journal.Status, Class: journal.Class, Categories: journal.Categories,
+				Contacts: journal.Contacts, RelatedTo: journal.RelatedTo, Conferences: journal.Conferences, URL: journal.URL, DateTimeStamp: journal.DateTimeStamp,
+				Created: journal.Created, LastModified: journal.LastModified, Recurrence: journal.Recurrence,
+				Attendees: journal.Attendees, Attachments: journal.Attachments, DiscoveredURLs: journal.DiscoveredURLs,
+				Images: journal.Images, RawProps: journal.RawProps,
+			})
+		}
+		out["journals"] = items
 	}
 	return out
 }
@@ -287,6 +420,10 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 	var fb FreeBusyInfo
 	var descEvent descriptionCapture
 	var descTodo descriptionCapture
+	var inJournal bool
+	var jr JournalInfo
+	var curJournal map[string]string
+	var descJournal descriptionCapture
 
 	locDefault := (*time.Location)(nil)
 	if defaultTZ != "" {
@@ -302,15 +439,20 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 			inEvent = true
 			cur = map[string]string{}
 			ev = EventInfo{
-				Summary:     "Untitled",
-				Attachments: []AttachmentInfo{},
-				Attendees:   []Attendee{},
-				RawProps:    map[string]string{},
-				VCards:      []VCard{},
-				Alarms:      []AlarmInfo{},
-				Categories:  []string{},
-				Resources:   []string{},
-				Conferences: []ConferenceInfo{},
+				Summary:         "Untitled",
+				Attachments:     []AttachmentInfo{},
+				Attendees:       []Attendee{},
+				RawProps:        map[string][]string{},
+				VCards:          []VCard{},
+				Alarms:          []AlarmInfo{},
+				Categories:      []string{},
+				Resources:       []string{},
+				Conferences:     []ConferenceInfo{},
+				Contacts:        []string{},
+				Comments:        []string{},
+				RelatedTo:       []string{},
+				RequestStatuses: []string{},
+				Images:          []ImageInfo{},
 			}
 			descEvent = descriptionCapture{}
 			continue
@@ -357,14 +499,19 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 			inTodo = true
 			curTodo = map[string]string{}
 			todo = TodoInfo{
-				Summary:     "Untitled Task",
-				Attachments: []AttachmentInfo{},
-				Attendees:   []Attendee{},
-				VCards:      []VCard{},
-				Alarms:      []AlarmInfo{},
-				Categories:  []string{},
-				Resources:   []string{},
-				RawProps:    map[string]string{},
+				Summary:         "Untitled Task",
+				Attachments:     []AttachmentInfo{},
+				Attendees:       []Attendee{},
+				VCards:          []VCard{},
+				Alarms:          []AlarmInfo{},
+				Categories:      []string{},
+				Resources:       []string{},
+				RawProps:        map[string][]string{},
+				Contacts:        []string{},
+				Comments:        []string{},
+				RelatedTo:       []string{},
+				RequestStatuses: []string{},
+				Images:          []ImageInfo{},
 			}
 			descTodo = descriptionCapture{}
 			continue
@@ -407,6 +554,67 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 			continue
 		}
 
+		if strings.HasPrefix(upper, "BEGIN:VJOURNAL") {
+			inJournal = true
+			curJournal = map[string]string{}
+			jr = JournalInfo{
+				Summary:     "Untitled Journal Entry",
+				Categories:  []string{},
+				Contacts:    []string{},
+				RelatedTo:   []string{},
+				Images:      []ImageInfo{},
+				Conferences: []ConferenceInfo{},
+				Attendees:   []Attendee{},
+				Attachments: []AttachmentInfo{},
+				RawProps:    map[string][]string{},
+			}
+			descJournal = descriptionCapture{}
+			continue
+		}
+		if strings.HasPrefix(upper, "END:VJOURNAL") {
+			if v, ok := curJournal["UID"]; ok && v != "" {
+				jr.UID = ptr(unescapeICSText(v))
+			}
+			if v, ok := curJournal["SUMMARY"]; ok {
+				if cleaned := strings.TrimSpace(unescapeICSText(v)); cleaned != "" {
+					jr.Summary = cleaned
+				}
+			}
+			if v, ok := curJournal["ORGANIZER"]; ok {
+				if cleaned := strings.TrimSpace(unescapeICSText(v)); cleaned != "" {
+					jr.Organizer = ptr(cleaned)
+				}
+			}
+			if v, ok := curJournal["STATUS"]; ok {
+				if cleaned := strings.TrimSpace(unescapeICSText(v)); cleaned != "" {
+					jr.Status = ptr(cleaned)
+				}
+			}
+			if v, ok := curJournal["CLASS"]; ok {
+				if cleaned := strings.TrimSpace(unescapeICSText(v)); cleaned != "" {
+					jr.Class = ptr(cleaned)
+				}
+			}
+			if v, ok := curJournal["URL"]; ok {
+				if cleaned := strings.TrimSpace(unescapeICSText(v)); cleaned != "" {
+					jr.URL = ptr(cleaned)
+					jr.DiscoveredURLs = append(jr.DiscoveredURLs, cleaned)
+				}
+			}
+			if descJournal.hasPlain {
+				jr.Description = ptr(descJournal.plain)
+			}
+			if descJournal.hasHTML {
+				jr.DescriptionHTML = ptr(descJournal.html)
+			}
+			if len(cal.Journals) >= maxEvents {
+				return nil, fmt.Errorf("too many journals in calendar (max %d)", maxEvents)
+			}
+			cal.Journals = append(cal.Journals, jr)
+			inJournal = false
+			continue
+		}
+
 		if strings.HasPrefix(upper, "BEGIN:VFREEBUSY") {
 			inFreebusy = true
 			fb = FreeBusyInfo{
@@ -415,7 +623,7 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 				VCards:      []VCard{},
 				Attendees:   []Attendee{},
 				Attachments: []AttachmentInfo{},
-				RawProps:    map[string]string{},
+				RawProps:    map[string][]string{},
 			}
 			continue
 		}
@@ -476,6 +684,13 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 			continue
 		}
 
+		if strings.HasPrefix(upper, "BEGIN:VAVAILABILITY") {
+			availability, endIdx := parseAvailability(lines, i, locDefault)
+			cal.Availabilities = append(cal.Availabilities, availability)
+			i = endIdx
+			continue
+		}
+
 		if strings.HasPrefix(line, "BEGIN:VCALENDAR") {
 			continue
 		}
@@ -483,7 +698,7 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 			continue
 		}
 
-		if !inEvent && !inTodo && !inFreebusy {
+		if !inEvent && !inTodo && !inFreebusy && !inJournal {
 			name, params, value := splitProp(line)
 			switch name {
 			case "PRODID":
@@ -514,6 +729,34 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 				if value != "" && cal.Description == nil {
 					cal.Description = ptr(value)
 				}
+			case "COLOR":
+				if value != "" {
+					cal.Color = ptr(value)
+				}
+			case "SOURCE":
+				if value != "" {
+					cal.Source = ptr(value)
+				}
+			case "REFRESH-INTERVAL":
+				if value != "" {
+					cal.RefreshInterval = ptr(value)
+				}
+			case "CATEGORIES":
+				parts := splitEscaped(value, ',', false)
+				for _, p := range parts {
+					p = strings.TrimSpace(unescapeICSText(p))
+					if p != "" {
+						cal.Categories = append(cal.Categories, p)
+					}
+				}
+			case "CONTACT":
+				contact := strings.TrimSpace(unescapeICSText(value))
+				if contact != "" {
+					cal.Contacts = append(cal.Contacts, contact)
+				}
+			case "IMAGE":
+				img := parseImage(value, params)
+				cal.Images = append(cal.Images, img)
 			}
 			_ = params
 			continue
@@ -530,9 +773,7 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 				cur[up] = value
 			case "X-ALT-DESC":
 				descEvent.absorbAltDescription(value, params)
-				if value != "" {
-					ev.RawProps[up] = value
-				}
+				ev.RawProps = addRawProp(ev.RawProps, up, value)
 			case "DTSTART":
 				if t, ok := parseICSTime(value, params, locDefault); ok {
 					ev.DTStart = &t
@@ -585,10 +826,40 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 						ev.Resources = append(ev.Resources, p)
 					}
 				}
+			case "CONTACT":
+				contact := strings.TrimSpace(unescapeICSText(value))
+				if contact != "" {
+					ev.Contacts = append(ev.Contacts, contact)
+				}
+			case "COMMENT":
+				comment := strings.TrimSpace(unescapeICSText(value))
+				if comment != "" {
+					ev.Comments = append(ev.Comments, comment)
+				}
+			case "RELATED", "RELATED-TO":
+				rel := strings.TrimSpace(unescapeICSText(value))
+				if rel != "" {
+					ev.RelatedTo = append(ev.RelatedTo, rel)
+				}
+			case "REQUEST-STATUS":
+				if value != "" {
+					ev.RequestStatuses = append(ev.RequestStatuses, value)
+				}
 			case "URL":
 				if value != "" {
 					ev.URL = ptr(value)
 				}
+			case "COLOR":
+				if value != "" {
+					ev.Color = ptr(value)
+				}
+			case "GEO":
+				if geo, ok := parseGeo(value); ok {
+					ev.Geo = geo
+				}
+			case "IMAGE":
+				img := parseImage(value, params)
+				ev.Images = append(ev.Images, img)
 			case "CONFERENCE":
 				conf := ConferenceInfo{URI: value}
 				if paramsCopy := copyParams(params); paramsCopy != nil {
@@ -641,9 +912,7 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 				}
 				ev.Attendees = append(ev.Attendees, parseAttendee(value, params))
 			default:
-				if value != "" {
-					ev.RawProps[up] = value
-				}
+				ev.RawProps = addRawProp(ev.RawProps, up, value)
 			}
 			continue
 		}
@@ -656,9 +925,7 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 				curTodo[up] = value
 			case "X-ALT-DESC":
 				descTodo.absorbAltDescription(value, params)
-				if value != "" {
-					todo.RawProps[up] = value
-				}
+				todo.RawProps = addRawProp(todo.RawProps, up, value)
 			case "DTSTART":
 				if t, ok := parseICSTime(value, params, locDefault); ok {
 					todo.Start = &t
@@ -711,6 +978,32 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 						todo.Resources = append(todo.Resources, p)
 					}
 				}
+			case "CONTACT":
+				contact := strings.TrimSpace(unescapeICSText(value))
+				if contact != "" {
+					todo.Contacts = append(todo.Contacts, contact)
+				}
+			case "COMMENT":
+				comment := strings.TrimSpace(unescapeICSText(value))
+				if comment != "" {
+					todo.Comments = append(todo.Comments, comment)
+				}
+			case "RELATED", "RELATED-TO":
+				rel := strings.TrimSpace(unescapeICSText(value))
+				if rel != "" {
+					todo.RelatedTo = append(todo.RelatedTo, rel)
+				}
+			case "REQUEST-STATUS":
+				if value != "" {
+					todo.RequestStatuses = append(todo.RequestStatuses, value)
+				}
+			case "COLOR":
+				if value != "" {
+					todo.Color = ptr(value)
+				}
+			case "IMAGE":
+				img := parseImage(value, params)
+				todo.Images = append(todo.Images, img)
 			case "URL":
 				if value != "" {
 					todo.URL = ptr(value)
@@ -761,9 +1054,104 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 				}
 				todo.Attendees = append(todo.Attendees, parseAttendee(value, params))
 			default:
-				if value != "" {
-					todo.RawProps[up] = value
+				todo.RawProps = addRawProp(todo.RawProps, up, value)
+			}
+			continue
+		}
+
+		if inJournal {
+			switch up {
+			case "DESCRIPTION":
+				descJournal.absorbDescription(value)
+			case "UID", "SUMMARY", "ORGANIZER", "STATUS", "CLASS", "URL":
+				curJournal[up] = value
+			case "CATEGORIES":
+				parts := splitEscaped(value, ',', false)
+				for _, p := range parts {
+					p = strings.TrimSpace(unescapeICSText(p))
+					if p != "" {
+						jr.Categories = append(jr.Categories, p)
+					}
 				}
+			case "CONTACT":
+				contact := strings.TrimSpace(unescapeICSText(value))
+				if contact != "" {
+					jr.Contacts = append(jr.Contacts, contact)
+				}
+			case "RELATED", "RELATED-TO":
+				rel := strings.TrimSpace(unescapeICSText(value))
+				if rel != "" {
+					jr.RelatedTo = append(jr.RelatedTo, rel)
+				}
+			case "DTSTART":
+				if t, ok := parseICSTime(value, params, locDefault); ok {
+					jr.DTStart = &t
+				}
+			case "DTSTAMP":
+				if t, ok := parseICSTime(value, params, locDefault); ok {
+					jr.DateTimeStamp = &t
+				}
+			case "CREATED":
+				if t, ok := parseICSTime(value, params, locDefault); ok {
+					jr.Created = &t
+				}
+			case "LAST-MODIFIED":
+				if t, ok := parseICSTime(value, params, locDefault); ok {
+					jr.LastModified = &t
+				}
+			case "X-ALT-DESC":
+				descJournal.absorbAltDescription(value, params)
+				jr.RawProps = addRawProp(jr.RawProps, up, value)
+			case "RRULE":
+				rec := ensureJournalRecurrence(&jr)
+				rec.RRule = ptr(value)
+			case "RDATE":
+				rec := ensureJournalRecurrence(&jr)
+				times, rawVals := parseICSMultiDates(value, params, locDefault)
+				if len(times) > 0 {
+					rec.RDates = append(rec.RDates, times...)
+				}
+				if len(rawVals) > 0 {
+					rec.RDateRaw = append(rec.RDateRaw, rawVals...)
+				}
+			case "EXDATE":
+				rec := ensureJournalRecurrence(&jr)
+				times, rawVals := parseICSMultiDates(value, params, locDefault)
+				if len(times) > 0 {
+					rec.ExDates = append(rec.ExDates, times...)
+				}
+				if len(rawVals) > 0 {
+					rec.ExDateRaw = append(rec.ExDateRaw, rawVals...)
+				}
+			case "RECURRENCE-ID":
+				rec := ensureJournalRecurrence(&jr)
+				if t, ok := parseICSTime(value, params, locDefault); ok {
+					rec.RecurrenceID = &t
+				} else if value != "" {
+					rec.RecurrenceIDRaw = ptr(value)
+				}
+			case "CONFERENCE":
+				conf := ConferenceInfo{URI: value}
+				if paramsCopy := copyParams(params); paramsCopy != nil {
+					conf.Params = paramsCopy
+				}
+				jr.Conferences = append(jr.Conferences, conf)
+			case "ATTACH":
+				if len(jr.Attachments) >= maxAttachments {
+					return nil, fmt.Errorf("too many attachments in journal (max %d)", maxAttachments)
+				}
+				att := parseAttach(value, params)
+				jr.Attachments = append(jr.Attachments, att)
+			case "ATTENDEE":
+				if len(jr.Attendees) >= maxAttendees {
+					return nil, fmt.Errorf("too many attendees in journal (max %d)", maxAttendees)
+				}
+				jr.Attendees = append(jr.Attendees, parseAttendee(value, params))
+			case "IMAGE":
+				img := parseImage(value, params)
+				jr.Images = append(jr.Images, img)
+			default:
+				jr.RawProps = addRawProp(jr.RawProps, up, value)
 			}
 			continue
 		}
@@ -809,9 +1197,7 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 				att := parseAttach(value, params)
 				fb.Attachments = append(fb.Attachments, att)
 			default:
-				if value != "" {
-					fb.RawProps[up] = value
-				}
+				fb.RawProps = addRawProp(fb.RawProps, up, value)
 			}
 			continue
 		}
@@ -841,8 +1227,8 @@ func lt(a, b EventInfo) bool {
 }
 
 const (
-	maxFoldedLineLength       = 10 * 1024 * 1024  // 10MB max per logical line (normal properties)
-	maxAttachPropertyLength   = 150 * 1024 * 1024 // 150MB max for ATTACH properties (allows 100MB base64 + overhead)
+	maxFoldedLineLength     = 10 * 1024 * 1024  // 10MB max per logical line (normal properties)
+	maxAttachPropertyLength = 150 * 1024 * 1024 // 150MB max for ATTACH properties (allows 100MB base64 + overhead)
 )
 
 func unfoldLines(r *bytes.Reader) ([]string, error) {
@@ -897,7 +1283,21 @@ func unfoldLines(r *bytes.Reader) ([]string, error) {
 
 func splitProp(line string) (name string, params map[string]string, value string) {
 	params = map[string]string{}
-	i := strings.IndexByte(line, ':')
+	i := -1
+	inQuote := false
+	for idx := 0; idx < len(line); idx++ {
+		ch := line[idx]
+		if ch == '"' {
+			if idx == 0 || line[idx-1] != '\\' {
+				inQuote = !inQuote
+			}
+			continue
+		}
+		if ch == ':' && !inQuote {
+			i = idx
+			break
+		}
+	}
 	if i < 0 {
 		return strings.ToUpper(line), params, ""
 	}
@@ -993,7 +1393,67 @@ func parseAttendee(value string, params map[string]string) Attendee {
 	if v := params["RSVP"]; v != "" {
 		a.RSVP = &v
 	}
+	if v := params["CUTYPE"]; v != "" {
+		a.Cutype = &v
+	}
+	if v := params["SENT-BY"]; v != "" {
+		normalized := stripMailto(trimQuotes(strings.TrimSpace(v)))
+		if normalized != "" {
+			a.SentBy = &normalized
+		}
+	}
+	if v := params["DIR"]; v != "" {
+		dir := trimQuotes(v)
+		if dir != "" {
+			a.Directory = &dir
+		}
+	}
+	if v := params["LANGUAGE"]; v != "" {
+		lang := strings.TrimSpace(v)
+		if lang != "" {
+			a.Language = &lang
+		}
+	}
+	if v := params["DELEGATED-FROM"]; v != "" {
+		if list := parseCalAddressList(v); len(list) > 0 {
+			a.DelegatedFrom = list
+		}
+	}
+	if v := params["DELEGATED-TO"]; v != "" {
+		if list := parseCalAddressList(v); len(list) > 0 {
+			a.DelegatedTo = list
+		}
+	}
+	if v := params["MEMBER"]; v != "" {
+		if list := parseCalAddressList(v); len(list) > 0 {
+			a.Member = list
+		}
+	}
 	return a
+}
+
+func stripMailto(s string) string {
+	ls := strings.ToLower(strings.TrimSpace(s))
+	if strings.HasPrefix(ls, "mailto:") {
+		return strings.TrimSpace(s)[7:]
+	}
+	return strings.TrimSpace(s)
+}
+
+func parseCalAddressList(raw string) []string {
+	parts := splitEscaped(raw, ',', false)
+	list := make([]string, 0, len(parts))
+	for _, part := range parts {
+		val := stripMailto(trimQuotes(strings.TrimSpace(part)))
+		if val == "" {
+			continue
+		}
+		list = append(list, val)
+	}
+	if len(list) == 0 {
+		return nil
+	}
+	return list
 }
 
 func unescapeICSText(s string) string {
@@ -1531,6 +1991,38 @@ func PopulateDiscoveredURLs(c *CalendarInfo) {
 			if !localSeen[u] {
 				localSeen[u] = true
 				td.DiscoveredURLs = append(td.DiscoveredURLs, u)
+				add(u)
+			}
+		}
+	}
+	for i := range c.Journals {
+		jn := &c.Journals[i]
+		urls := []string{}
+		urls = append(urls, ExtractURLs(jn.Summary)...)
+		if jn.Description != nil {
+			urls = append(urls, ExtractURLs(*jn.Description)...)
+		}
+		if jn.Organizer != nil {
+			urls = append(urls, ExtractURLs(*jn.Organizer)...)
+		}
+		if jn.URL != nil {
+			urls = append(urls, *jn.URL)
+		}
+		for _, att := range jn.Attachments {
+			if att.Source == "url" && att.Value != "" {
+				urls = append(urls, att.Value)
+			}
+		}
+		for _, conf := range jn.Conferences {
+			if conf.URI != "" {
+				urls = append(urls, conf.URI)
+			}
+		}
+		localSeen := map[string]bool{}
+		for _, u := range urls {
+			if !localSeen[u] {
+				localSeen[u] = true
+				jn.DiscoveredURLs = append(jn.DiscoveredURLs, u)
 				add(u)
 			}
 		}

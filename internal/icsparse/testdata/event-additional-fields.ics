@@ -1,0 +1,26 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//ics-ics-baby test//EN
+NAME:Phish Calendar
+COLOR:#123456
+CATEGORIES:Security,Phishing
+SOURCE:https://example.com/feed.ics
+REFRESH-INTERVAL;VALUE=DURATION:PT1H
+CONTACT:security-team@example.com
+IMAGE;VALUE=URI;DISPLAY=BADGE;FMTTYPE=image/png:https://example.com/logo.png
+BEGIN:VEVENT
+UID:event-1@example.com
+DTSTAMP:20240101T010101Z
+DTSTART:20240102T030000Z
+SUMMARY:Urgent Support Call
+LOCATION:Conference Room
+GEO:37.7749;-122.4194
+COLOR:blue
+CONTACT:Call +1-555-0100
+COMMENT:Bring your laptop
+RELATED-TO:prev-event@example.com
+REQUEST-STATUS:2.0;Success
+IMAGE;VALUE=URI;DISPLAY=GRAPHIC;FMTTYPE=image/jpeg:https://example.com/banner.jpg
+ATTENDEE;CN=Alice;ROLE=CHAIR;PARTSTAT=ACCEPTED;RSVP=TRUE;CUTYPE=INDIVIDUAL;DELEGATED-FROM="mailto:bob@example.com";DELEGATED-TO="mailto:carol@example.com";SENT-BY="mailto:dave@example.com":mailto:alice@example.com
+END:VEVENT
+END:VCALENDAR
