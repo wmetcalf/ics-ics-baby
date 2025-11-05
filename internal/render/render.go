@@ -480,15 +480,6 @@ func RenderAgendaPNG(cal *icsparse.CalendarInfo, outPath string, width int, styl
 	dc.DrawStringAnchored(title, panelX+cardPad, panelY+cardPad+titleSize, 0, 0)
 
 	y := panelY + cardPad + titleSize + 8
-	meta := "Generated preview"
-	if cal.ProdID != nil && *cal.ProdID != "" {
-		meta = fmt.Sprintf("%s  •  PRODID: %s", meta, *cal.ProdID)
-	}
-	dc.SetFontFace(loadFontFace("", smallSize))
-	dc.SetColor(pal.Muted)
-	dc.DrawStringAnchored(meta, panelX+cardPad, y, 0, 0)
-
-	y += 18
 
 	for _, e := range events {
 		cardX := panelX + cardPad
