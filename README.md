@@ -1,4 +1,4 @@
-# ics-ics-baby https://suno.com/s/KuqOpEIg8A2YG9VL 
+# ics-ics-baby [https://suno.com/s/KuqOpEIg8A2YG9VL](https://suno.com/s/NAsV8wMpu6sLKxH5) 
 ![ics-ics-baby logo](logo/icsicsbaby.png)
 
 `ics-ics-baby` is a CLI workbench for tearing apart suspicious calendar invites. It parses `.ics` payloads, extracts everything useful (events, tasks, free/busy, attachments, vcards), and emits:
