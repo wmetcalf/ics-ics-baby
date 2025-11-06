@@ -202,6 +202,9 @@ func availableWindowSummary(win icsparse.AvailableWindow) string {
 
 func availabilityWindowDetails(win icsparse.AvailableWindow) []string {
 	lines := []string{}
+	if win.UID != nil && strings.TrimSpace(*win.UID) != "" {
+		lines = append(lines, "• UID: "+strings.TrimSpace(*win.UID))
+	}
 	if win.Location != nil && strings.TrimSpace(*win.Location) != "" {
 		lines = append(lines, "• Location: "+strings.TrimSpace(*win.Location))
 	}
@@ -723,6 +726,12 @@ html,body {
       </div>
 
       <div class="fields">
+        {{ if .UID }}
+        <div class="field">
+          <div class="field-label">UID:</div>
+          <div class="field-value">{{ str .UID }}</div>
+        </div>
+        {{ end }}
         {{ if .DTStart }}
         <div class="field">
           <div class="field-label">Start Date:</div>
@@ -992,6 +1001,12 @@ html,body {
       </div>
 
       <div class="fields">
+        {{ if .UID }}
+        <div class="field">
+          <div class="field-label">UID:</div>
+          <div class="field-value">{{ str .UID }}</div>
+        </div>
+        {{ end }}
         {{ if .Start }}
         <div class="field">
           <div class="field-label">Start Date:</div>
@@ -1226,6 +1241,12 @@ html,body {
       </div>
 
       <div class="fields">
+        {{ if .UID }}
+        <div class="field">
+          <div class="field-label">UID:</div>
+          <div class="field-value">{{ str .UID }}</div>
+        </div>
+        {{ end }}
         {{ if .DTStart }}
         <div class="field">
           <div class="field-label">Date:</div>
@@ -1357,6 +1378,12 @@ html,body {
       </div>
 
       <div class="fields">
+        {{ if .UID }}
+        <div class="field">
+          <div class="field-label">UID:</div>
+          <div class="field-value">{{ str .UID }}</div>
+        </div>
+        {{ end }}
         {{ if .BusyType }}
         <div class="field">
           <div class="field-label">Busy Type:</div>
@@ -1475,6 +1502,12 @@ html,body {
         <div class="title">Free/Busy Window</div>
       </div>
       <div class="fields">
+        {{ if .UID }}
+        <div class="field">
+          <div class="field-label">UID:</div>
+          <div class="field-value">{{ str .UID }}</div>
+        </div>
+        {{ end }}
         {{ if .Start }}
         <div class="field">
           <div class="field-label">Start:</div>

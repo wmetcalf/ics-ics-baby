@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/fogleman/gg"
@@ -20,6 +19,7 @@ import (
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/font/gofont/goregular"
+	"ics-ics-baby/internal/fonts"
 	"ics-ics-baby/internal/icsparse"
 )
 
@@ -152,27 +152,29 @@ func getPalette(style string) palette {
 	}
 }
 
-var (
-	goRegularFontOnce sync.Once
-	goRegularFont     *truetype.Font
-	goRegularErr      error
-)
-
 func loadFontFace(path string, size float64) font.Face {
+	// Try user-specified font path first
 	if path != "" {
 		if face, err := gg.LoadFontFace(path, size); err == nil {
 			return face
 		}
 	}
-	goRegularFontOnce.Do(func() {
-		goRegularFont, goRegularErr = truetype.Parse(goregular.TTF)
-	})
-	if goRegularErr == nil && goRegularFont != nil {
+
+	// Use embedded composite font set for wide Unicode and emoji coverage.
+	if face, _ := fonts.NewFallbackFace(size); face != nil {
+		return face
+	}
+
+	// Fallback to Go regular font if the embedded bundle fails for some reason
+	goRegularFont, err := truetype.Parse(goregular.TTF)
+	if err == nil && goRegularFont != nil {
 		return truetype.NewFace(goRegularFont, &truetype.Options{
 			Size:    size,
 			Hinting: font.HintingFull,
 		})
 	}
+
+	// Last resort
 	return basicfont.Face7x13
 }
 
@@ -500,7 +502,31 @@ func RenderAgendaPNG(cal *icsparse.CalendarInfo, outPath string, width int, styl
 		if len(e.Attachments) > 0 {
 			attH = float64((len(e.Attachments)+1)/2) * 24.0
 		}
-		cardH := 18.0 + lineH*3 + descH + attH + eventPad
+
+		var loc, org, uid string
+		if e.Location != nil {
+			loc = cleanText(*e.Location)
+		}
+		if e.Organizer != nil {
+			org = cleanText(*e.Organizer)
+		}
+		if e.UID != nil {
+			uid = strings.TrimSpace(*e.UID)
+		}
+		startS := fmtTime(e.DTStart)
+		endS := fmtTime(e.DTEnd)
+		metaLines := []string{fmt.Sprintf("Starts: %s   Ends: %s", startS, endS)}
+		if uid != "" {
+			metaLines = append(metaLines, "UID: "+uid)
+		}
+		if loc != "" {
+			metaLines = append(metaLines, "Location: "+loc)
+		}
+		if org != "" {
+			metaLines = append(metaLines, "Organizer: "+org)
+		}
+
+		cardH := 18.0 + lineH*(0.6+0.8*float64(len(metaLines))) + descH + attH + eventPad
 
 		dc.SetColor(pal.Edge)
 		dc.DrawRoundedRectangle(cardX, y, cardW, cardH, 10)
@@ -515,27 +541,15 @@ func RenderAgendaPNG(cal *icsparse.CalendarInfo, outPath string, width int, styl
 
 		dc.SetFontFace(loadFontFace("", textSize))
 		dc.SetColor(pal.Muted)
-		var loc, org string
-		if e.Location != nil {
-			loc = cleanText(*e.Location)
-		}
-		if e.Organizer != nil {
-			org = cleanText(*e.Organizer)
-		}
-		startS := fmtTime(e.DTStart)
-		endS := fmtTime(e.DTEnd)
-		metaLine := fmt.Sprintf("Starts: %s   Ends: %s", startS, endS)
-		dc.DrawStringAnchored(metaLine, innerX, innerY+lineH*2.4, 0, 0)
-		if loc != "" {
-			dc.DrawStringAnchored("Location: "+loc, innerX, innerY+lineH*3.2, 0, 0)
-		}
-		if org != "" {
-			dc.DrawStringAnchored("Organizer: "+org, innerX, innerY+lineH*4.0, 0, 0)
+		metaBase := innerY + lineH*2.4
+		metaStep := lineH * 0.8
+		for idx, line := range metaLines {
+			dc.DrawStringAnchored(line, innerX, metaBase+metaStep*float64(idx), 0, 0)
 		}
 
 		dc.SetColor(pal.Text)
 		dc.SetFontFace(loadFontFace("", textSize))
-		textY := innerY + lineH*4.8
+		textY := metaBase + metaStep*float64(len(metaLines)) + metaStep
 		dc.DrawStringWrapped(desc, innerX, textY, 0, 0, wrapWidth, 1.5, gg.AlignLeft)
 
 		if len(e.Attachments) > 0 {
@@ -901,6 +915,9 @@ func buildInviteLayouts(events []icsparse.EventInfo, width int) ([]inviteEventLa
 			}
 
 			fields := make([]inviteField, 0, 20)
+			if e.UID != nil && strings.TrimSpace(*e.UID) != "" {
+				fields = append(fields, addField("UID:", []string{strings.TrimSpace(*e.UID)})...)
+			}
 			if e.DTStart != nil {
 				fields = append(fields, addField("Start Date:", []string{formatDateTime(e.DTStart)})...)
 			}
@@ -1113,6 +1130,9 @@ func buildAvailabilityLayouts(avails []icsparse.AvailabilityInfo, width int) []i
 		}
 
 		fields := make([]inviteField, 0, 16)
+		if av.UID != nil && strings.TrimSpace(*av.UID) != "" {
+			fields = append(fields, addField("UID:", []string{strings.TrimSpace(*av.UID)})...)
+		}
 		if av.BusyType != nil && *av.BusyType != "" {
 			fields = append(fields, addField("Busy Type:", []string{*av.BusyType})...)
 		}
@@ -1254,6 +1274,9 @@ func availableWindowText(win icsparse.AvailableWindow) string {
 
 func availabilityWindowDetailTexts(win icsparse.AvailableWindow) []string {
 	lines := []string{}
+	if win.UID != nil && strings.TrimSpace(*win.UID) != "" {
+		lines = append(lines, "UID: "+strings.TrimSpace(*win.UID))
+	}
 	if win.Location != nil && strings.TrimSpace(*win.Location) != "" {
 		lines = append(lines, "Location: "+strings.TrimSpace(*win.Location))
 	}
@@ -1273,6 +1296,9 @@ func availabilityWindowDetailTexts(win icsparse.AvailableWindow) []string {
 
 func availabilityInfoLines(av icsparse.AvailabilityInfo) []string {
 	lines := make([]string, 0, 8)
+	if av.UID != nil && strings.TrimSpace(*av.UID) != "" {
+		lines = append(lines, "UID: "+strings.TrimSpace(*av.UID))
+	}
 	if av.BusyType != nil && *av.BusyType != "" {
 		lines = append(lines, "Busy: "+*av.BusyType)
 	}
@@ -1369,6 +1395,9 @@ func buildJournalLayouts(journals []icsparse.JournalInfo, width int) []inviteEve
 		}
 
 		fields := make([]inviteField, 0, 16)
+		if jn.UID != nil && strings.TrimSpace(*jn.UID) != "" {
+			fields = append(fields, addField("UID:", []string{strings.TrimSpace(*jn.UID)})...)
+		}
 		if jn.DTStart != nil {
 			fields = append(fields, addField("Date:", []string{formatDateTime(jn.DTStart)})...)
 		}
@@ -1471,6 +1500,9 @@ func buildJournalLayouts(journals []icsparse.JournalInfo, width int) []inviteEve
 
 func journalInfoLines(jn icsparse.JournalInfo) []string {
 	lines := make([]string, 0, 16)
+	if jn.UID != nil && strings.TrimSpace(*jn.UID) != "" {
+		lines = append(lines, "UID: "+strings.TrimSpace(*jn.UID))
+	}
 	if jn.DTStart != nil {
 		lines = append(lines, "Date: "+formatDateTime(jn.DTStart))
 	}
