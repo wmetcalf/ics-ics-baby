@@ -10,8 +10,5 @@ var DejaVuSans []byte
 //go:embed NotoSans-Regular.ttf
 var NotoSansRegular []byte
 
-//go:embed NotoSans-Bold.ttf
-var NotoSansBold []byte
-
-//go:embed EmojiOneColor.otf
-var EmojiOneColor []byte
+// NotoSans-Bold not used - normal weight is sufficient
+// EmojiOneColor not used - color emoji unsupported by opentype renderer

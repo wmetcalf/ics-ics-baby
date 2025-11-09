@@ -31,10 +31,10 @@ func embeddedFonts() ([]*opentype.Font, error) {
 			}
 			parsedFonts = append(parsedFonts, f)
 		}
-		add(DejaVuSans, "DejaVuSans.ttf")
+		// NotoSans has better kerning than DejaVu for capital letters like T
 		add(NotoSansRegular, "NotoSans-Regular.ttf")
-		add(NotoSansBold, "NotoSans-Bold.ttf")
-		add(EmojiOneColor, "EmojiOneColor.otf")
+		add(DejaVuSans, "DejaVuSans.ttf")
+		// Note: EmojiOneColor.otf removed - color emoji not supported by opentype renderer
 		if len(parsedFonts) == 0 {
 			if errs != nil {
 				parseErr = errs

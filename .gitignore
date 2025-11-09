@@ -1,0 +1,29 @@
+# Build artifacts
+/dist/*.tar.gz
+/dist/*.zip
+/dist/MD5SUMS
+/dist/SHA256SUMS
+/ics-ics-baby
+/ics-ics-baby-*
+/wkhtml-wrap
+
+# Output directory
+/out/
+
+# Go build cache
+/.gocache/
+
+# Temporary files
+/nsjail/
+*.tmp
+*.swp
+*~
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db

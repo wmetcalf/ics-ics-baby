@@ -325,6 +325,20 @@ func RenderAgendaPNG(cal *icsparse.CalendarInfo, outPath string, width int, styl
 	sort.SliceStable(events, func(i, j int) bool { return lessByStart(events[i], events[j]) })
 
 	h := int(2*pad + cardPad + 40)
+	// Add space for calendar metadata if present
+	metaLineCount := 0
+	if cal.Calscale != nil && *cal.Calscale != "" {
+		metaLineCount++
+	}
+	if cal.TimezoneID != nil && *cal.TimezoneID != "" {
+		metaLineCount++
+	}
+	if len(cal.Timezones) > 0 {
+		metaLineCount++
+	}
+	if metaLineCount > 0 {
+		h += int(lineH * float64(metaLineCount))
+	}
 	for _, e := range events {
 		cardBase := 90.0
 		desc := ""
@@ -482,6 +496,35 @@ func RenderAgendaPNG(cal *icsparse.CalendarInfo, outPath string, width int, styl
 	dc.DrawStringAnchored(title, panelX+cardPad, panelY+cardPad+titleSize, 0, 0)
 
 	y := panelY + cardPad + titleSize + 8
+
+	// Display calendar metadata (scale and timezone) matching HTML format
+	var calMeta []string
+	if cal.Calscale != nil && *cal.Calscale != "" {
+		calMeta = append(calMeta, "Calendar Scale: "+*cal.Calscale)
+	}
+	if cal.TimezoneID != nil && *cal.TimezoneID != "" {
+		calMeta = append(calMeta, "Default TZ: "+*cal.TimezoneID)
+	}
+	// Add timezone definitions if present
+	if len(cal.Timezones) > 0 {
+		tzNames := make([]string, 0, len(cal.Timezones))
+		for _, tz := range cal.Timezones {
+			if tz.TZID != nil && *tz.TZID != "" {
+				tzNames = append(tzNames, *tz.TZID)
+			}
+		}
+		if len(tzNames) > 0 {
+			calMeta = append(calMeta, "Timezones: "+strings.Join(tzNames, ", "))
+		}
+	}
+	if len(calMeta) > 0 {
+		dc.SetFontFace(loadFontFace("", smallSize))
+		dc.SetColor(pal.Muted)
+		for idx, line := range calMeta {
+			dc.DrawStringAnchored(line, panelX+cardPad, y+smallSize+float64(idx)*lineH, 0, 0)
+		}
+		y += lineH * float64(len(calMeta))
+	}
 
 	for _, e := range events {
 		cardX := panelX + cardPad
@@ -702,25 +745,27 @@ func RenderAgendaPNG(cal *icsparse.CalendarInfo, outPath string, width int, styl
 }
 
 const (
-	invitePad            = 30.0
-	inviteHeaderPadX     = 20.0
-	inviteHeaderPadY     = 18.0
-	inviteHeaderMargin   = 20.0
-	inviteEventSpacing   = 30.0
-	inviteIconSize       = 20.0
-	inviteIconGap        = 15.0
-	inviteLabelWidth     = 110.0
-	inviteLabelPadding   = 10.0
-	inviteHeaderLineH    = 22.0
-	inviteLineHeight     = 20.0
-	inviteBaselineAdjust = 6.0
-	inviteDescPadding    = 15.0
-	inviteFieldSpacing   = 8.0
-	inviteSectionSpacing = 20.0
-	inviteTitleSize      = 16.0
-	inviteLabelSize      = 13.0
-	inviteTextSize       = 13.0
-	inviteMinHeight      = 500
+	invitePad             = 30.0
+	inviteHeaderPadX      = 20.0
+	inviteHeaderPadY      = 18.0
+	inviteHeaderMargin    = 20.0
+	inviteEventSpacing    = 30.0
+	inviteIconSize        = 20.0
+	inviteIconGap         = 15.0
+	inviteLabelWidth      = 110.0
+	inviteLabelPadding    = 10.0
+	inviteMinValueWidth   = 140.0
+	inviteLabelMeasurePad = 6.0
+	inviteHeaderLineH     = 22.0
+	inviteLineHeight      = 20.0
+	inviteBaselineAdjust  = 6.0
+	inviteDescPadding     = 15.0
+	inviteFieldSpacing    = 8.0
+	inviteSectionSpacing  = 20.0
+	inviteTitleSize       = 16.0
+	inviteLabelSize       = 13.0
+	inviteTextSize        = 13.0
+	inviteMinHeight       = 500
 )
 
 type inviteField struct {
@@ -739,6 +784,7 @@ type inviteEventLayout struct {
 	totalHeight    float64
 	hasDescription bool
 	iconColor      string
+	labelWidth     float64
 }
 
 func RenderInvitePNG(cal *icsparse.CalendarInfo, outPath string, width int, style string) error {
@@ -754,6 +800,23 @@ func RenderInvitePNG(cal *icsparse.CalendarInfo, outPath string, width int, styl
 	journalLayouts := buildJournalLayouts(cal.Journals, width)
 	layouts = append(layouts, journalLayouts...)
 	totalHeight := calculateLayoutsHeight(layouts)
+
+	// Add height for calendar metadata section if needed
+	metaLineCount := 0
+	if cal.Calscale != nil && *cal.Calscale != "" {
+		metaLineCount++
+	}
+	if cal.TimezoneID != nil && *cal.TimezoneID != "" {
+		metaLineCount++
+	}
+	if len(cal.Timezones) > 0 {
+		metaLineCount++
+	}
+	if metaLineCount > 0 {
+		metaHeight := inviteLineHeight*float64(metaLineCount) + inviteDescPadding*2
+		totalHeight += metaHeight + inviteHeaderMargin
+	}
+
 	height := int(math.Ceil(math.Max(float64(inviteMinHeight), totalHeight)))
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 	draw.Draw(img, img.Bounds(), &image.Uniform{pal.Bg}, image.Point{}, draw.Src)
@@ -767,6 +830,48 @@ func RenderInvitePNG(cal *icsparse.CalendarInfo, outPath string, width int, styl
 	headerTextX := invitePad + inviteHeaderPadX + inviteIconSize + inviteIconGap
 
 	y := invitePad
+
+	// Display calendar metadata (scale and timezone) if available, matching HTML format
+	var calMeta []string
+	if cal.Calscale != nil && *cal.Calscale != "" {
+		calMeta = append(calMeta, "Calendar Scale: "+*cal.Calscale)
+	}
+	if cal.TimezoneID != nil && *cal.TimezoneID != "" {
+		calMeta = append(calMeta, "Default TZ: "+*cal.TimezoneID)
+	}
+	// Add timezone definitions if present
+	if len(cal.Timezones) > 0 {
+		tzNames := make([]string, 0, len(cal.Timezones))
+		for _, tz := range cal.Timezones {
+			if tz.TZID != nil && *tz.TZID != "" {
+				tzNames = append(tzNames, *tz.TZID)
+			}
+		}
+		if len(tzNames) > 0 {
+			calMeta = append(calMeta, "Timezones: "+strings.Join(tzNames, ", "))
+		}
+	}
+	if len(calMeta) > 0 {
+		metaHeight := inviteLineHeight*float64(len(calMeta)) + inviteDescPadding*2
+		dc.SetColor(pal.Panel)
+		dc.DrawRoundedRectangle(invitePad, y, contentWidth, metaHeight, 6)
+		dc.Fill()
+		dc.SetColor(pal.Edge)
+		dc.SetLineWidth(1.0)
+		dc.DrawRoundedRectangle(invitePad, y, contentWidth, metaHeight, 6)
+		dc.Stroke()
+
+		dc.SetFontFace(textFace)
+		dc.SetColor(pal.Muted)
+		textX := invitePad + inviteDescPadding
+		textY := y + inviteDescPadding + inviteLineHeight - inviteBaselineAdjust
+		for _, line := range calMeta {
+			dc.DrawString(line, textX, textY)
+			textY += inviteLineHeight
+		}
+		y += metaHeight + inviteHeaderMargin
+	}
+
 	for i, layout := range layouts {
 		// Header container
 		dc.SetColor(pal.Panel)
@@ -800,7 +905,7 @@ func RenderInvitePNG(cal *icsparse.CalendarInfo, outPath string, width int, styl
 		if len(layout.fields) > 0 {
 			currentY := y
 			for idx, field := range layout.fields {
-				drawInviteField(dc, field, invitePad, currentY, pal, labelFace, textFace)
+				drawInviteField(dc, field, invitePad, currentY, pal, labelFace, textFace, layout.labelWidth)
 				currentY += field.height
 				if idx < len(layout.fields)-1 {
 					currentY += inviteFieldSpacing
@@ -852,10 +957,6 @@ func buildInviteLayouts(events []icsparse.EventInfo, width int) ([]inviteEventLa
 	if contentWidth < 200 {
 		contentWidth = 200
 	}
-	valueWidth := contentWidth - inviteLabelWidth - inviteLabelPadding
-	if valueWidth < 140 {
-		valueWidth = 140
-	}
 	descWidth := contentWidth - inviteDescPadding*2
 	if descWidth < 140 {
 		descWidth = 140
@@ -868,6 +969,7 @@ func buildInviteLayouts(events []icsparse.EventInfo, width int) ([]inviteEventLa
 	ctx := gg.NewContext(width, 100)
 	titleFace := loadFontFace("", inviteTitleSize)
 	textFace := loadFontFace("", inviteTextSize)
+	labelFace := loadFontFace("", inviteLabelSize)
 
 	layouts := make([]inviteEventLayout, 0, maxInt(len(events), 1))
 
@@ -901,127 +1003,148 @@ func buildInviteLayouts(events []icsparse.EventInfo, width int) ([]inviteEventLa
 			layout.headerHeight = math.Max(inviteIconSize, titleHeight) + inviteHeaderPadY*2
 			layout.iconColor = sanitizeColorPtr(e.Color)
 
-			ctx.SetFontFace(textFace)
-			addField := func(label string, lines []string) []inviteField {
-				filtered := filterLines(lines, false)
-				if len(filtered) == 0 {
-					return nil
-				}
-				height := inviteLineHeight * float64(len(filtered))
-				if height < inviteLineHeight {
-					height = inviteLineHeight
-				}
-				return []inviteField{{label: label, lines: filtered, height: height}}
+			baseValueWidth := contentWidth - inviteLabelWidth - inviteLabelPadding
+			if baseValueWidth < inviteMinValueWidth {
+				baseValueWidth = inviteMinValueWidth
 			}
 
-			fields := make([]inviteField, 0, 20)
-			if e.UID != nil && strings.TrimSpace(*e.UID) != "" {
-				fields = append(fields, addField("UID:", []string{strings.TrimSpace(*e.UID)})...)
-			}
-			if e.DTStart != nil {
-				fields = append(fields, addField("Start Date:", []string{formatDateTime(e.DTStart)})...)
-			}
-			if e.DTEnd != nil {
-				fields = append(fields, addField("End Date:", []string{formatDateTime(e.DTEnd)})...)
-			}
-			if e.Location != nil {
-				loc := cleanText(*e.Location)
-				if loc != "" {
-					fields = append(fields, addField("Location:", wordWrapWithSmartURLs(ctx, loc, valueWidth))...)
+			buildFields := func(w float64) []inviteField {
+				ctx.SetFontFace(textFace)
+				addField := func(label string, lines []string) []inviteField {
+					filtered := filterLines(lines, false)
+					if len(filtered) == 0 {
+						return nil
+					}
+					height := inviteLineHeight * float64(len(filtered))
+					if height < inviteLineHeight {
+						height = inviteLineHeight
+					}
+					return []inviteField{{label: label, lines: filtered, height: height}}
 				}
-			}
-			if geo := geoLines(ctx, e.Geo, valueWidth); len(geo) > 0 {
-				fields = append(fields, addField("Coordinates:", geo)...)
-			}
-			if e.Organizer != nil {
-				org := cleanText(*e.Organizer)
-				if org != "" {
-					fields = append(fields, addField("Organizer:", wordWrapWithSmartURLs(ctx, org, valueWidth))...)
+
+				fields := make([]inviteField, 0, 20)
+				if e.UID != nil && strings.TrimSpace(*e.UID) != "" {
+					fields = append(fields, addField("UID:", []string{strings.TrimSpace(*e.UID)})...)
 				}
-			}
-			if contacts := bulletListLines(ctx, e.Contacts, valueWidth); len(contacts) > 0 {
-				fields = append(fields, addField("Contacts:", contacts)...)
-			}
-			if e.Status != nil && *e.Status != "" {
-				fields = append(fields, addField("Status:", []string{*e.Status})...)
-			}
-			if e.Transparency != nil && *e.Transparency != "" {
-				fields = append(fields, addField("Transparency:", []string{*e.Transparency})...)
-			}
-			if e.Priority != nil {
-				fields = append(fields, addField("Priority:", []string{fmt.Sprintf("%d", *e.Priority)})...)
-			}
-			if e.Class != nil && *e.Class != "" {
-				fields = append(fields, addField("Class:", []string{*e.Class})...)
-			}
-			if e.Sequence != nil {
-				fields = append(fields, addField("Sequence:", []string{fmt.Sprintf("%d", *e.Sequence)})...)
-			}
-			if hex := sanitizeColorPtr(e.Color); hex != "" {
-				fields = append(fields, addField("Color:", []string{hex})...)
-			}
-			if e.Duration != nil && *e.Duration != "" {
-				fields = append(fields, addField("Duration:", []string{*e.Duration})...)
-			}
-			if e.URL != nil && *e.URL != "" {
-				fields = append(fields, addField("URL:", wordWrapWithSmartURLs(ctx, *e.URL, valueWidth))...)
-			}
-			if urls := urlListLines(ctx, e.DiscoveredURLs, valueWidth); len(urls) > 0 {
-				fields = append(fields, addField("Referenced URLs:", urls)...)
-			}
-			if len(e.Categories) > 0 {
-				joined := strings.Join(e.Categories, ", ")
-				fields = append(fields, addField("Categories:", wordWrapWithSmartURLs(ctx, joined, valueWidth))...)
-			}
-			if len(e.Resources) > 0 {
-				joined := strings.Join(e.Resources, ", ")
-				fields = append(fields, addField("Resources:", wordWrapWithSmartURLs(ctx, joined, valueWidth))...)
-			}
-			if comments := bulletListLines(ctx, e.Comments, valueWidth); len(comments) > 0 {
-				fields = append(fields, addField("Comments:", comments)...)
-			}
-			if related := bulletListLines(ctx, e.RelatedTo, valueWidth); len(related) > 0 {
-				fields = append(fields, addField("Related To:", related)...)
-			}
-			if statuses := requestStatusLines(ctx, e.RequestStatuses, valueWidth); len(statuses) > 0 {
-				fields = append(fields, addField("Request Status:", statuses)...)
-			}
-			if images := imageLines(ctx, e.Images, valueWidth); len(images) > 0 {
-				fields = append(fields, addField("Images:", images)...)
-			}
-			if conf := conferenceLines(ctx, e.Conferences, valueWidth); len(conf) > 0 {
-				fields = append(fields, addField("Conference:", conf)...)
-			}
-			if rec := recurrenceLines(ctx, e.Recurrence, valueWidth); len(rec) > 0 {
-				fields = append(fields, addField("Recurrence:", rec)...)
-			}
-			if e.Created != nil {
-				fields = append(fields, addField("Created:", []string{formatDateTime(e.Created)})...)
-			}
-			if e.LastModified != nil {
-				fields = append(fields, addField("Last Modified:", []string{formatDateTime(e.LastModified)})...)
-			}
-			if e.DateTimeStamp != nil {
-				fields = append(fields, addField("Timestamp:", []string{formatDateTime(e.DateTimeStamp)})...)
+				if e.DTStart != nil {
+					fields = append(fields, addField("Start Date:", []string{formatDateTime(e.DTStart)})...)
+				}
+				if e.DTEnd != nil {
+					fields = append(fields, addField("End Date:", []string{formatDateTime(e.DTEnd)})...)
+				}
+				if e.Location != nil {
+					loc := cleanText(*e.Location)
+					if loc != "" {
+						fields = append(fields, addField("Location:", wordWrapWithSmartURLs(ctx, loc, w))...)
+					}
+				}
+				if geo := geoLines(ctx, e.Geo, w); len(geo) > 0 {
+					fields = append(fields, addField("Coordinates:", geo)...)
+				}
+				if e.Organizer != nil {
+					org := cleanText(*e.Organizer)
+					if org != "" {
+						fields = append(fields, addField("Organizer:", wordWrapWithSmartURLs(ctx, org, w))...)
+					}
+				}
+				if contacts := bulletListLines(ctx, e.Contacts, w); len(contacts) > 0 {
+					fields = append(fields, addField("Contacts:", contacts)...)
+				}
+				if e.Status != nil && *e.Status != "" {
+					fields = append(fields, addField("Status:", []string{*e.Status})...)
+				}
+				if e.Transparency != nil && *e.Transparency != "" {
+					fields = append(fields, addField("Transparency:", []string{*e.Transparency})...)
+				}
+				if e.Priority != nil {
+					fields = append(fields, addField("Priority:", []string{fmt.Sprintf("%d", *e.Priority)})...)
+				}
+				if e.Class != nil && *e.Class != "" {
+					fields = append(fields, addField("Class:", []string{*e.Class})...)
+				}
+				if e.Sequence != nil {
+					fields = append(fields, addField("Sequence:", []string{fmt.Sprintf("%d", *e.Sequence)})...)
+				}
+				if hex := sanitizeColorPtr(e.Color); hex != "" {
+					fields = append(fields, addField("Color:", []string{hex})...)
+				}
+				if e.Duration != nil && *e.Duration != "" {
+					fields = append(fields, addField("Duration:", []string{*e.Duration})...)
+				}
+				if e.URL != nil && *e.URL != "" {
+					fields = append(fields, addField("URL:", wordWrapWithSmartURLs(ctx, *e.URL, w))...)
+				}
+				if urls := urlListLines(ctx, e.DiscoveredURLs, w); len(urls) > 0 {
+					fields = append(fields, addField("Referenced URLs:", urls)...)
+				}
+				if len(e.Categories) > 0 {
+					joined := strings.Join(e.Categories, ", ")
+					fields = append(fields, addField("Categories:", wordWrapWithSmartURLs(ctx, joined, w))...)
+				}
+				if len(e.Resources) > 0 {
+					joined := strings.Join(e.Resources, ", ")
+					fields = append(fields, addField("Resources:", wordWrapWithSmartURLs(ctx, joined, w))...)
+				}
+				if comments := bulletListLines(ctx, e.Comments, w); len(comments) > 0 {
+					fields = append(fields, addField("Comments:", comments)...)
+				}
+				if related := bulletListLines(ctx, e.RelatedTo, w); len(related) > 0 {
+					fields = append(fields, addField("Related To:", related)...)
+				}
+				if statuses := requestStatusLines(ctx, e.RequestStatuses, w); len(statuses) > 0 {
+					fields = append(fields, addField("Request Status:", statuses)...)
+				}
+				if images := imageLines(ctx, e.Images, w); len(images) > 0 {
+					fields = append(fields, addField("Images:", images)...)
+				}
+				if conf := conferenceLines(ctx, e.Conferences, w); len(conf) > 0 {
+					fields = append(fields, addField("Conference:", conf)...)
+				}
+				if rec := recurrenceLines(ctx, e.Recurrence, w); len(rec) > 0 {
+					fields = append(fields, addField("Recurrence:", rec)...)
+				}
+				if e.Created != nil {
+					fields = append(fields, addField("Created:", []string{formatDateTime(e.Created)})...)
+				}
+				if e.LastModified != nil {
+					fields = append(fields, addField("Last Modified:", []string{formatDateTime(e.LastModified)})...)
+				}
+				if e.DateTimeStamp != nil {
+					fields = append(fields, addField("Timestamp:", []string{formatDateTime(e.DateTimeStamp)})...)
+				}
+
+				if lines := attendeeLines(ctx, e.Attendees, w); len(lines) > 0 {
+					fields = append(fields, addField("Attendees:", lines)...)
+				}
+
+				if len(e.Attachments) > 0 {
+					entries := make([]string, 0, len(e.Attachments))
+					for _, att := range e.Attachments {
+						entries = append(entries, "• "+chipLabel(att))
+					}
+					fields = append(fields, addField("Attachments:", wrapListLines(ctx, entries, w))...)
+				}
+
+				if alarms := alarmSummaryLines(ctx, e.Alarms, w); len(alarms) > 0 {
+					fields = append(fields, addField("Alarms:", alarms)...)
+				}
+
+				return fields
 			}
 
-			if lines := attendeeLines(ctx, e.Attendees, valueWidth); len(lines) > 0 {
-				fields = append(fields, addField("Attendees:", lines)...)
+			fields := buildFields(baseValueWidth)
+			labelWidth := measureLabelColumnWidth(ctx, labelFace, fields, contentWidth)
+			actualValueWidth := contentWidth - labelWidth - inviteLabelPadding
+			if actualValueWidth < inviteMinValueWidth {
+				actualValueWidth = inviteMinValueWidth
+				labelWidth = contentWidth - actualValueWidth - inviteLabelPadding
 			}
-
-			if len(e.Attachments) > 0 {
-				entries := make([]string, 0, len(e.Attachments))
-				for _, att := range e.Attachments {
-					entries = append(entries, "• "+chipLabel(att))
-				}
-				fields = append(fields, addField("Attachments:", wrapListLines(ctx, entries, valueWidth))...)
-			}
-
-			if alarms := alarmSummaryLines(ctx, e.Alarms, valueWidth); len(alarms) > 0 {
-				fields = append(fields, addField("Alarms:", alarms)...)
+			if math.Abs(actualValueWidth-baseValueWidth) > 0.1 {
+				fields = buildFields(actualValueWidth)
 			}
 
 			layout.fields = fields
+			layout.labelWidth = labelWidth
 			if len(fields) > 0 {
 				height := 0.0
 				for idx, f := range fields {
@@ -1083,10 +1206,6 @@ func buildAvailabilityLayouts(avails []icsparse.AvailabilityInfo, width int) []i
 	if contentWidth < 200 {
 		contentWidth = 200
 	}
-	valueWidth := contentWidth - inviteLabelWidth - inviteLabelPadding
-	if valueWidth < 140 {
-		valueWidth = 140
-	}
 	descWidth := contentWidth - inviteDescPadding*2
 	if descWidth < 140 {
 		descWidth = 140
@@ -1099,6 +1218,7 @@ func buildAvailabilityLayouts(avails []icsparse.AvailabilityInfo, width int) []i
 	ctx := gg.NewContext(width, 100)
 	titleFace := loadFontFace("", inviteTitleSize)
 	textFace := loadFontFace("", inviteTextSize)
+	labelFace := loadFontFace("", inviteLabelSize)
 
 	layouts := make([]inviteEventLayout, 0, len(avails))
 
@@ -1116,70 +1236,90 @@ func buildAvailabilityLayouts(avails []icsparse.AvailabilityInfo, width int) []i
 		titleHeight := inviteHeaderLineH * float64(len(layout.summaryLines))
 		layout.headerHeight = math.Max(inviteIconSize, titleHeight) + inviteHeaderPadY*2
 
-		ctx.SetFontFace(textFace)
-		addField := func(label string, lines []string) []inviteField {
-			filtered := filterLines(lines, false)
-			if len(filtered) == 0 {
-				return nil
-			}
-			height := inviteLineHeight * float64(len(filtered))
-			if height < inviteLineHeight {
-				height = inviteLineHeight
-			}
-			return []inviteField{{label: label, lines: filtered, height: height}}
+		baseValueWidth := contentWidth - inviteLabelWidth - inviteLabelPadding
+		if baseValueWidth < inviteMinValueWidth {
+			baseValueWidth = inviteMinValueWidth
 		}
 
-		fields := make([]inviteField, 0, 16)
-		if av.UID != nil && strings.TrimSpace(*av.UID) != "" {
-			fields = append(fields, addField("UID:", []string{strings.TrimSpace(*av.UID)})...)
+		buildFields := func(w float64) []inviteField {
+			ctx.SetFontFace(textFace)
+			addField := func(label string, lines []string) []inviteField {
+				filtered := filterLines(lines, false)
+				if len(filtered) == 0 {
+					return nil
+				}
+				height := inviteLineHeight * float64(len(filtered))
+				if height < inviteLineHeight {
+					height = inviteLineHeight
+				}
+				return []inviteField{{label: label, lines: filtered, height: height}}
+			}
+
+			fields := make([]inviteField, 0, 16)
+			if av.UID != nil && strings.TrimSpace(*av.UID) != "" {
+				fields = append(fields, addField("UID:", []string{strings.TrimSpace(*av.UID)})...)
+			}
+			if av.BusyType != nil && *av.BusyType != "" {
+				fields = append(fields, addField("Busy Type:", []string{*av.BusyType})...)
+			}
+			if av.Start != nil {
+				fields = append(fields, addField("Start:", []string{formatDateTime(av.Start)})...)
+			}
+			if av.End != nil {
+				fields = append(fields, addField("End:", []string{formatDateTime(av.End)})...)
+			}
+			if av.Duration != nil && *av.Duration != "" {
+				fields = append(fields, addField("Duration:", []string{*av.Duration})...)
+			}
+			if av.Organizer != nil && *av.Organizer != "" {
+				fields = append(fields, addField("Organizer:", wordWrapWithSmartURLs(ctx, *av.Organizer, w))...)
+			}
+			if av.Location != nil && *av.Location != "" {
+				fields = append(fields, addField("Location:", wordWrapWithSmartURLs(ctx, *av.Location, w))...)
+			}
+			if av.URL != nil && *av.URL != "" {
+				fields = append(fields, addField("URL:", wordWrapWithSmartURLs(ctx, *av.URL, w))...)
+			}
+			if contacts := bulletListLines(ctx, av.Contacts, w); len(contacts) > 0 {
+				fields = append(fields, addField("Contacts:", contacts)...)
+			}
+			if len(av.Categories) > 0 {
+				fields = append(fields, addField("Categories:", wordWrapWithSmartURLs(ctx, strings.Join(av.Categories, ", "), w))...)
+			}
+			if av.Priority != nil {
+				fields = append(fields, addField("Priority:", []string{fmt.Sprintf("%d", *av.Priority)})...)
+			}
+			if av.Sequence != nil {
+				fields = append(fields, addField("Sequence:", []string{fmt.Sprintf("%d", *av.Sequence)})...)
+			}
+			if av.Created != nil {
+				fields = append(fields, addField("Created:", []string{formatDateTime(av.Created)})...)
+			}
+			if av.LastModified != nil {
+				fields = append(fields, addField("Last Modified:", []string{formatDateTime(av.LastModified)})...)
+			}
+			if av.DateTimeStamp != nil {
+				fields = append(fields, addField("Timestamp:", []string{formatDateTime(av.DateTimeStamp)})...)
+			}
+			if slots := availabilityWindowLines(ctx, av.Available, w); len(slots) > 0 {
+				fields = append(fields, addField("Slots:", slots)...)
+			}
+			return fields
 		}
-		if av.BusyType != nil && *av.BusyType != "" {
-			fields = append(fields, addField("Busy Type:", []string{*av.BusyType})...)
+
+		fields := buildFields(baseValueWidth)
+		labelWidth := measureLabelColumnWidth(ctx, labelFace, fields, contentWidth)
+		actualValueWidth := contentWidth - labelWidth - inviteLabelPadding
+		if actualValueWidth < inviteMinValueWidth {
+			actualValueWidth = inviteMinValueWidth
+			labelWidth = contentWidth - actualValueWidth - inviteLabelPadding
 		}
-		if av.Start != nil {
-			fields = append(fields, addField("Start:", []string{formatDateTime(av.Start)})...)
-		}
-		if av.End != nil {
-			fields = append(fields, addField("End:", []string{formatDateTime(av.End)})...)
-		}
-		if av.Duration != nil && *av.Duration != "" {
-			fields = append(fields, addField("Duration:", []string{*av.Duration})...)
-		}
-		if av.Organizer != nil && *av.Organizer != "" {
-			fields = append(fields, addField("Organizer:", wordWrapWithSmartURLs(ctx, *av.Organizer, valueWidth))...)
-		}
-		if av.Location != nil && *av.Location != "" {
-			fields = append(fields, addField("Location:", wordWrapWithSmartURLs(ctx, *av.Location, valueWidth))...)
-		}
-		if av.URL != nil && *av.URL != "" {
-			fields = append(fields, addField("URL:", wordWrapWithSmartURLs(ctx, *av.URL, valueWidth))...)
-		}
-		if contacts := bulletListLines(ctx, av.Contacts, valueWidth); len(contacts) > 0 {
-			fields = append(fields, addField("Contacts:", contacts)...)
-		}
-		if len(av.Categories) > 0 {
-			fields = append(fields, addField("Categories:", wordWrapWithSmartURLs(ctx, strings.Join(av.Categories, ", "), valueWidth))...)
-		}
-		if av.Priority != nil {
-			fields = append(fields, addField("Priority:", []string{fmt.Sprintf("%d", *av.Priority)})...)
-		}
-		if av.Sequence != nil {
-			fields = append(fields, addField("Sequence:", []string{fmt.Sprintf("%d", *av.Sequence)})...)
-		}
-		if av.Created != nil {
-			fields = append(fields, addField("Created:", []string{formatDateTime(av.Created)})...)
-		}
-		if av.LastModified != nil {
-			fields = append(fields, addField("Last Modified:", []string{formatDateTime(av.LastModified)})...)
-		}
-		if av.DateTimeStamp != nil {
-			fields = append(fields, addField("Timestamp:", []string{formatDateTime(av.DateTimeStamp)})...)
-		}
-		if slots := availabilityWindowLines(ctx, av.Available, valueWidth); len(slots) > 0 {
-			fields = append(fields, addField("Slots:", slots)...)
+		if math.Abs(actualValueWidth-baseValueWidth) > 0.1 {
+			fields = buildFields(actualValueWidth)
 		}
 
 		layout.fields = fields
+		layout.labelWidth = labelWidth
 		if len(fields) > 0 {
 			height := 0.0
 			for idx, f := range fields {
@@ -1348,10 +1488,6 @@ func buildJournalLayouts(journals []icsparse.JournalInfo, width int) []inviteEve
 	if contentWidth < 200 {
 		contentWidth = 200
 	}
-	valueWidth := contentWidth - inviteLabelWidth - inviteLabelPadding
-	if valueWidth < 140 {
-		valueWidth = 140
-	}
 	descWidth := contentWidth - inviteDescPadding*2
 	if descWidth < 140 {
 		descWidth = 140
@@ -1364,6 +1500,7 @@ func buildJournalLayouts(journals []icsparse.JournalInfo, width int) []inviteEve
 	ctx := gg.NewContext(width, 100)
 	titleFace := loadFontFace("", inviteTitleSize)
 	textFace := loadFontFace("", inviteTextSize)
+	labelFace := loadFontFace("", inviteLabelSize)
 
 	layouts := make([]inviteEventLayout, 0, len(journals))
 
@@ -1381,80 +1518,100 @@ func buildJournalLayouts(journals []icsparse.JournalInfo, width int) []inviteEve
 		titleHeight := inviteHeaderLineH * float64(len(layout.summaryLines))
 		layout.headerHeight = math.Max(inviteIconSize, titleHeight) + inviteHeaderPadY*2
 
-		ctx.SetFontFace(textFace)
-		addField := func(label string, lines []string) []inviteField {
-			filtered := filterLines(lines, false)
-			if len(filtered) == 0 {
-				return nil
-			}
-			height := inviteLineHeight * float64(len(filtered))
-			if height < inviteLineHeight {
-				height = inviteLineHeight
-			}
-			return []inviteField{{label: label, lines: filtered, height: height}}
+		baseValueWidth := contentWidth - inviteLabelWidth - inviteLabelPadding
+		if baseValueWidth < inviteMinValueWidth {
+			baseValueWidth = inviteMinValueWidth
 		}
 
-		fields := make([]inviteField, 0, 16)
-		if jn.UID != nil && strings.TrimSpace(*jn.UID) != "" {
-			fields = append(fields, addField("UID:", []string{strings.TrimSpace(*jn.UID)})...)
-		}
-		if jn.DTStart != nil {
-			fields = append(fields, addField("Date:", []string{formatDateTime(jn.DTStart)})...)
-		}
-		if jn.Organizer != nil && *jn.Organizer != "" {
-			fields = append(fields, addField("Organizer:", wordWrapWithSmartURLs(ctx, cleanText(*jn.Organizer), valueWidth))...)
-		}
-		if jn.Status != nil && *jn.Status != "" {
-			fields = append(fields, addField("Status:", []string{*jn.Status})...)
-		}
-		if jn.Class != nil && *jn.Class != "" {
-			fields = append(fields, addField("Class:", []string{*jn.Class})...)
-		}
-		if len(jn.Categories) > 0 {
-			fields = append(fields, addField("Categories:", wordWrapWithSmartURLs(ctx, strings.Join(jn.Categories, ", "), valueWidth))...)
-		}
-		if contacts := bulletListLines(ctx, jn.Contacts, valueWidth); len(contacts) > 0 {
-			fields = append(fields, addField("Contacts:", contacts)...)
-		}
-		if related := bulletListLines(ctx, jn.RelatedTo, valueWidth); len(related) > 0 {
-			fields = append(fields, addField("Related To:", related)...)
-		}
-		if jn.URL != nil && *jn.URL != "" {
-			fields = append(fields, addField("URL:", wordWrapWithSmartURLs(ctx, *jn.URL, valueWidth))...)
-		}
-		if jn.DateTimeStamp != nil {
-			fields = append(fields, addField("Timestamp:", []string{formatDateTime(jn.DateTimeStamp)})...)
-		}
-		if jn.Created != nil {
-			fields = append(fields, addField("Created:", []string{formatDateTime(jn.Created)})...)
-		}
-		if jn.LastModified != nil {
-			fields = append(fields, addField("Last Modified:", []string{formatDateTime(jn.LastModified)})...)
-		}
-		if rec := recurrenceLines(ctx, jn.Recurrence, valueWidth); len(rec) > 0 {
-			fields = append(fields, addField("Recurrence:", rec)...)
-		}
-		if lines := attendeeLines(ctx, jn.Attendees, valueWidth); len(lines) > 0 {
-			fields = append(fields, addField("Attendees:", lines)...)
-		}
-		if images := imageLines(ctx, jn.Images, valueWidth); len(images) > 0 {
-			fields = append(fields, addField("Images:", images)...)
-		}
-		if conf := conferenceLines(ctx, jn.Conferences, valueWidth); len(conf) > 0 {
-			fields = append(fields, addField("Conference:", conf)...)
-		}
-		if len(jn.Attachments) > 0 {
-			entries := make([]string, 0, len(jn.Attachments))
-			for _, att := range jn.Attachments {
-				entries = append(entries, "• "+chipLabel(att))
+		buildFields := func(w float64) []inviteField {
+			ctx.SetFontFace(textFace)
+			addField := func(label string, lines []string) []inviteField {
+				filtered := filterLines(lines, false)
+				if len(filtered) == 0 {
+					return nil
+				}
+				height := inviteLineHeight * float64(len(filtered))
+				if height < inviteLineHeight {
+					height = inviteLineHeight
+				}
+				return []inviteField{{label: label, lines: filtered, height: height}}
 			}
-			fields = append(fields, addField("Attachments:", wrapListLines(ctx, entries, valueWidth))...)
+
+			fields := make([]inviteField, 0, 16)
+			if jn.UID != nil && strings.TrimSpace(*jn.UID) != "" {
+				fields = append(fields, addField("UID:", []string{strings.TrimSpace(*jn.UID)})...)
+			}
+			if jn.DTStart != nil {
+				fields = append(fields, addField("Date:", []string{formatDateTime(jn.DTStart)})...)
+			}
+			if jn.Organizer != nil && *jn.Organizer != "" {
+				fields = append(fields, addField("Organizer:", wordWrapWithSmartURLs(ctx, cleanText(*jn.Organizer), w))...)
+			}
+			if jn.Status != nil && *jn.Status != "" {
+				fields = append(fields, addField("Status:", []string{*jn.Status})...)
+			}
+			if jn.Class != nil && *jn.Class != "" {
+				fields = append(fields, addField("Class:", []string{*jn.Class})...)
+			}
+			if len(jn.Categories) > 0 {
+				fields = append(fields, addField("Categories:", wordWrapWithSmartURLs(ctx, strings.Join(jn.Categories, ", "), w))...)
+			}
+			if contacts := bulletListLines(ctx, jn.Contacts, w); len(contacts) > 0 {
+				fields = append(fields, addField("Contacts:", contacts)...)
+			}
+			if related := bulletListLines(ctx, jn.RelatedTo, w); len(related) > 0 {
+				fields = append(fields, addField("Related To:", related)...)
+			}
+			if jn.URL != nil && *jn.URL != "" {
+				fields = append(fields, addField("URL:", wordWrapWithSmartURLs(ctx, *jn.URL, w))...)
+			}
+			if jn.DateTimeStamp != nil {
+				fields = append(fields, addField("Timestamp:", []string{formatDateTime(jn.DateTimeStamp)})...)
+			}
+			if jn.Created != nil {
+				fields = append(fields, addField("Created:", []string{formatDateTime(jn.Created)})...)
+			}
+			if jn.LastModified != nil {
+				fields = append(fields, addField("Last Modified:", []string{formatDateTime(jn.LastModified)})...)
+			}
+			if rec := recurrenceLines(ctx, jn.Recurrence, w); len(rec) > 0 {
+				fields = append(fields, addField("Recurrence:", rec)...)
+			}
+			if lines := attendeeLines(ctx, jn.Attendees, w); len(lines) > 0 {
+				fields = append(fields, addField("Attendees:", lines)...)
+			}
+			if images := imageLines(ctx, jn.Images, w); len(images) > 0 {
+				fields = append(fields, addField("Images:", images)...)
+			}
+			if conf := conferenceLines(ctx, jn.Conferences, w); len(conf) > 0 {
+				fields = append(fields, addField("Conference:", conf)...)
+			}
+			if len(jn.Attachments) > 0 {
+				entries := make([]string, 0, len(jn.Attachments))
+				for _, att := range jn.Attachments {
+					entries = append(entries, "• "+chipLabel(att))
+				}
+				fields = append(fields, addField("Attachments:", wrapListLines(ctx, entries, w))...)
+			}
+			if urls := urlListLines(ctx, jn.DiscoveredURLs, w); len(urls) > 0 {
+				fields = append(fields, addField("Referenced URLs:", urls)...)
+			}
+			return fields
 		}
-		if urls := urlListLines(ctx, jn.DiscoveredURLs, valueWidth); len(urls) > 0 {
-			fields = append(fields, addField("Referenced URLs:", urls)...)
+
+		fields := buildFields(baseValueWidth)
+		labelWidth := measureLabelColumnWidth(ctx, labelFace, fields, contentWidth)
+		actualValueWidth := contentWidth - labelWidth - inviteLabelPadding
+		if actualValueWidth < inviteMinValueWidth {
+			actualValueWidth = inviteMinValueWidth
+			labelWidth = contentWidth - actualValueWidth - inviteLabelPadding
+		}
+		if math.Abs(actualValueWidth-baseValueWidth) > 0.1 {
+			fields = buildFields(actualValueWidth)
 		}
 
 		layout.fields = fields
+		layout.labelWidth = labelWidth
 		if len(fields) > 0 {
 			height := 0.0
 			for idx, f := range fields {
@@ -1681,9 +1838,13 @@ func filterLines(lines []string, keepEmpty bool) []string {
 	return out
 }
 
-func drawInviteField(dc *gg.Context, field inviteField, x, y float64, pal palette, labelFace, textFace font.Face) {
+func drawInviteField(dc *gg.Context, field inviteField, x, y float64, pal palette, labelFace, textFace font.Face, labelWidth float64) {
 	labelX := x + inviteLabelPadding
-	valueX := x + inviteLabelWidth + inviteLabelPadding
+	columnWidth := labelWidth
+	if columnWidth < inviteLabelWidth {
+		columnWidth = inviteLabelWidth
+	}
+	valueX := x + columnWidth + inviteLabelPadding
 	baseline := y + inviteLineHeight - inviteBaselineAdjust
 
 	dc.SetFontFace(labelFace)
@@ -1699,6 +1860,31 @@ func drawInviteField(dc *gg.Context, field inviteField, x, y float64, pal palett
 		}
 		lineY += inviteLineHeight
 	}
+}
+
+func measureLabelColumnWidth(ctx *gg.Context, face font.Face, fields []inviteField, contentWidth float64) float64 {
+	if len(fields) == 0 {
+		return inviteLabelWidth
+	}
+	ctx.SetFontFace(face)
+	maxWidth := inviteLabelWidth
+	for _, field := range fields {
+		if w, _ := ctx.MeasureString(field.label); w > maxWidth {
+			maxWidth = w
+		}
+	}
+	maxWidth += inviteLabelMeasurePad
+	maxAllowed := contentWidth - inviteMinValueWidth - inviteLabelPadding
+	if maxAllowed < inviteLabelWidth {
+		maxAllowed = inviteLabelWidth
+	}
+	if maxWidth > maxAllowed {
+		return maxAllowed
+	}
+	if maxWidth < inviteLabelWidth {
+		return inviteLabelWidth
+	}
+	return maxWidth
 }
 
 func chipLabel(a icsparse.AttachmentInfo) string {
