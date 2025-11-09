@@ -30,7 +30,7 @@ echo "Checking Go installation..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 GO_MIN_VERSION="1.22"
-GO_LATEST_VERSION="1.23.5"
+GO_LATEST_VERSION="1.25.4"
 
 if command -v go &> /dev/null; then
     GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')

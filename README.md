@@ -18,7 +18,7 @@ Security-oriented heuristics drive the renderer: descriptions are normalised for
 - **Attachment extraction**: inline base64 blobs (including vCards) and remote links are saved into the output directory.
 - **URL harvesting**: every description/todo body is scanned for URLs and surfaced in the manifest.
 
-> ⚠️ `--download-attachments` contacts remote hosts. Use it only on trusted networks and adjust `--max-attachment-bytes` (default 1 GiB) to keep per-file size in check.
+> ⚠️ `--download-attachments` contacts remote hosts. Use it only on trusted networks and adjust `--max-attachment-bytes` (default 100 MiB) to keep per-file size in check.
 
 ## Installation
 
@@ -27,10 +27,10 @@ Security-oriented heuristics drive the renderer: descriptions are normalised for
 Download the latest release for your platform from the releases page.
 
 ```bash
-# Extract and run
-tar xzf ics-ics-baby_*_linux_amd64.tar.gz
-cd ics-ics-baby_*_linux_amd64
-./ics-ics-baby suspect.ics
+# Download the binary for your platform (Linux example)
+# Make executable and run
+chmod +x ics-ics-baby_linux_amd64
+./ics-ics-baby_linux_amd64 suspect.ics
 ```
 
 **Note:** Pre-built releases contain only the `ics-ics-baby` binary (statically linked, no dependencies). The `wkhtml-wrap` sandbox is **not included** in distribution packages because it has system-specific library dependencies. If you want to use the `wkhtml` screenshot engine, you'll need to build `wkhtml-wrap` locally (see Option 2 below).
@@ -68,9 +68,9 @@ sudo apt-get update
 sudo apt-get install -y golang
 
 # Option B: Install latest from official source
-wget https://go.dev/dl/go1.23.5.linux-amd64.tar.gz
+wget https://go.dev/dl/go1.25.4.linux-amd64.tar.gz
 sudo rm -rf /usr/local/go
-sudo tar -C /usr/local -xzf go1.23.5.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.25.4.linux-amd64.tar.gz
 echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
 source ~/.bashrc
 ```
@@ -171,7 +171,7 @@ brew install --cask wkhtmltopdf
   /path/to/suspect.ics
 ```
 
-Outputs land in `out/<slug>/` by default:
+Outputs land in `out/` by default:
 
 - `ics-ics-baby-manifest.json`
 - `ics-ics-baby-preview.html`
@@ -193,7 +193,7 @@ Two rendering engines are available via `--screenshot-engine`:
 
 **`wkhtml`** — Uses `wkhtmltoimage` (Qt5 WebKit) to render the full HTML preview. Requires:
 - `wkhtmltoimage` binary in PATH
-- `wkhtml-wrap` sandbox (included in Linux packages, recommended for security)
+- `wkhtml-wrap` sandbox (strongly recommended for security, must be built locally - see [Building wkhtml-wrap Sandbox](#building-wkhtml-wrap-sandbox-linux-only))
 
 The `wkhtml` engine provides:
 - Full HTML table rendering (invoice layouts, structured content)
@@ -225,7 +225,7 @@ The `wkhtml` engine provides:
 
 The wrapper is auto-discovered from:
 1. `--wkhtml-wrap` flag (if specified)
-2. Same directory as `ics-ics-baby` binary (packaged together in Linux releases)
+2. Same directory as `ics-ics-baby` binary
 3. System PATH
 
 If `--wkhtml-wrap` is explicitly specified but not found, execution fails. Otherwise, it falls back to direct execution with a warning.
@@ -300,12 +300,13 @@ done
 - `internal/fonts/` — embedded font files (NotoSans, DejaVu) for Go renderer.
 - `internal/util/` — helpers for slugging, IO, etc.
 
-`dist/` holds cross-platform release bundles produced by `./build.sh`. Each run drops artifacts like:
+`dist/` holds cross-platform binaries produced by `./build.sh`. Each run drops artifacts like:
 
-- `ics-ics-baby_<version>_linux_amd64.tar.gz`
-- `ics-ics-baby_<version>_linux_arm64.tar.gz`
-- `ics-ics-baby_<version>_darwin_amd64.tar.gz`
-- `ics-ics-baby_<version>_darwin_arm64.tar.gz`
-- `ics-ics-baby_<version>_windows_amd64.zip`
+- `ics-ics-baby_linux_amd64`
+- `ics-ics-baby_linux_arm64`
+- `ics-ics-baby_darwin_amd64`
+- `ics-ics-baby_darwin_arm64`
+- `ics-ics-baby_windows_amd64.exe`
+- `ics-ics-baby_windows_arm64.exe`
 
-Every archive contains the compiled `ics-ics-baby` binary (statically linked), `README.md`, and `LICENSE`. The `wkhtml-wrap` sandbox is **not included** in distribution packages and must be built locally on the target system (see [Building wkhtml-wrap Sandbox](#building-wkhtml-wrap-sandbox-linux-only)). The `out/` directory is safe to purge between local runs.
+All binaries are statically linked with no runtime dependencies. The `wkhtml-wrap` sandbox is **not included** in distribution packages and must be built locally on the target system (see [Building wkhtml-wrap Sandbox](#building-wkhtml-wrap-sandbox-linux-only)). The `out/` directory is safe to purge between local runs.

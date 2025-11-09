@@ -1,8 +1,8 @@
 module ics-ics-baby
 
-go 1.24.0
+go 1.25.0
 
-toolchain go1.24.9
+toolchain go1.25.4
 
 require github.com/fogleman/gg v1.3.0
 
