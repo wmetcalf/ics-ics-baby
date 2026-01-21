@@ -200,3 +200,39 @@ type JournalInfo struct {
 	Images          []ImageInfo         `json:"images,omitempty"`
 	RawProps        map[string][]string `json:"raw_props,omitempty"`
 }
+
+// OrganizerInfo captures detailed organizer information for spoofing detection.
+type OrganizerInfo struct {
+	Value     string  `json:"value"`
+	CN        *string `json:"cn,omitempty"`
+	SentBy    *string `json:"sent_by,omitempty"`
+	Directory *string `json:"directory,omitempty"`
+}
+
+// AutoprocessingSignals captures security-relevant indicators for calendar autoprocessing abuse detection.
+// These signals help identify potential phishing, spoofing, or meeting hijacking attempts.
+type AutoprocessingSignals struct {
+	// OrganizerDetails contains parsed organizer information including SENT-BY for spoofing detection
+	OrganizerDetails *OrganizerInfo `json:"organizer_details,omitempty"`
+
+	// MicrosoftHeaders contains X-MICROSOFT-* properties that can be used for Teams meeting manipulation
+	MicrosoftHeaders map[string]string `json:"microsoft_headers,omitempty"`
+
+	// GoogleHeaders contains X-GOOGLE-* properties used for Google Meet/Calendar manipulation
+	GoogleHeaders map[string]string `json:"google_headers,omitempty"`
+
+	// HasHighSequence indicates if SEQUENCE value is unusually high (>10), potential update hijacking
+	HasHighSequence bool `json:"has_high_sequence,omitempty"`
+
+	// HasSentByMismatch indicates ORGANIZER SENT-BY differs from organizer address, potential spoofing
+	HasSentByMismatch bool `json:"has_sent_by_mismatch,omitempty"`
+
+	// SuspiciousPatterns contains human-readable warnings about detected suspicious patterns
+	SuspiciousPatterns []string `json:"suspicious_patterns,omitempty"`
+
+	// InformationalPatterns contains human-readable notes about standard features (not suspicious but worth noting)
+	InformationalPatterns []string `json:"informational_patterns,omitempty"`
+
+	// RedirectTargets contains extracted destination URLs from redirect parameters
+	RedirectTargets []string `json:"redirect_targets,omitempty"`
+}

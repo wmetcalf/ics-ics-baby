@@ -47,65 +47,67 @@ type AttachmentInfo struct {
 }
 
 type EventInfo struct {
-	DiscoveredURLs  []string            `json:"discovered_urls,omitempty"`
-	UID             *string             `json:"uid,omitempty"`
-	Summary         string              `json:"summary"`
-	DTStart         *time.Time          `json:"dtstart,omitempty"`
-	DTEnd           *time.Time          `json:"dtend,omitempty"`
-	Location        *string             `json:"location,omitempty"`
-	Description     *string             `json:"description,omitempty"`
-	DescriptionHTML *string             `json:"description_html,omitempty"`
-	Organizer       *string             `json:"organizer,omitempty"`
-	Status          *string             `json:"status,omitempty"`
-	Attendees       []Attendee          `json:"attendees,omitempty"`
-	Attachments     []AttachmentInfo    `json:"attachments"`
-	VCards          []VCard             `json:"vcards,omitempty"`
-	Alarms          []AlarmInfo         `json:"alarms,omitempty"`
-	Categories      []string            `json:"categories,omitempty"`
-	Resources       []string            `json:"resources,omitempty"`
-	Contacts        []string            `json:"contacts,omitempty"`
-	Comments        []string            `json:"comments,omitempty"`
-	RelatedTo       []string            `json:"related_to,omitempty"`
-	RequestStatuses []string            `json:"request_statuses,omitempty"`
-	Images          []ImageInfo         `json:"images,omitempty"`
-	Conferences     []ConferenceInfo    `json:"conferences,omitempty"`
-	Recurrence      *RecurrenceInfo     `json:"recurrence,omitempty"`
-	Transparency    *string             `json:"transparency,omitempty"`
-	Priority        *int                `json:"priority,omitempty"`
-	Class           *string             `json:"class,omitempty"`
-	Color           *string             `json:"color,omitempty"`
-	Geo             *GeoPoint           `json:"geo,omitempty"`
-	URL             *string             `json:"url,omitempty"`
-	Created         *time.Time          `json:"created,omitempty"`
-	LastModified    *time.Time          `json:"last_modified,omitempty"`
-	DateTimeStamp   *time.Time          `json:"dtstamp,omitempty"`
-	Sequence        *int                `json:"sequence,omitempty"`
-	Duration        *string             `json:"duration,omitempty"`
-	RawProps        map[string][]string `json:"raw_props"`
+	DiscoveredURLs        []string               `json:"discovered_urls,omitempty"`
+	UID                   *string                `json:"uid,omitempty"`
+	Summary               string                 `json:"summary"`
+	DTStart               *time.Time             `json:"dtstart,omitempty"`
+	DTEnd                 *time.Time             `json:"dtend,omitempty"`
+	Location              *string                `json:"location,omitempty"`
+	Description           *string                `json:"description,omitempty"`
+	DescriptionHTML       *string                `json:"description_html,omitempty"`
+	Organizer             *string                `json:"organizer,omitempty"`
+	Status                *string                `json:"status,omitempty"`
+	Attendees             []Attendee             `json:"attendees,omitempty"`
+	Attachments           []AttachmentInfo       `json:"attachments"`
+	VCards                []VCard                `json:"vcards,omitempty"`
+	Alarms                []AlarmInfo            `json:"alarms,omitempty"`
+	Categories            []string               `json:"categories,omitempty"`
+	Resources             []string               `json:"resources,omitempty"`
+	Contacts              []string               `json:"contacts,omitempty"`
+	Comments              []string               `json:"comments,omitempty"`
+	RelatedTo             []string               `json:"related_to,omitempty"`
+	RequestStatuses       []string               `json:"request_statuses,omitempty"`
+	Images                []ImageInfo            `json:"images,omitempty"`
+	Conferences           []ConferenceInfo       `json:"conferences,omitempty"`
+	Recurrence            *RecurrenceInfo        `json:"recurrence,omitempty"`
+	Transparency          *string                `json:"transparency,omitempty"`
+	Priority              *int                   `json:"priority,omitempty"`
+	Class                 *string                `json:"class,omitempty"`
+	Color                 *string                `json:"color,omitempty"`
+	Geo                   *GeoPoint              `json:"geo,omitempty"`
+	URL                   *string                `json:"url,omitempty"`
+	Created               *time.Time             `json:"created,omitempty"`
+	LastModified          *time.Time             `json:"last_modified,omitempty"`
+	DateTimeStamp         *time.Time             `json:"dtstamp,omitempty"`
+	Sequence              *int                   `json:"sequence,omitempty"`
+	Duration              *string                `json:"duration,omitempty"`
+	RawProps              map[string][]string    `json:"raw_props"`
+	AutoprocessingSignals *AutoprocessingSignals `json:"autoprocessing_signals,omitempty"`
 }
 
 type CalendarInfo struct {
-	DiscoveredURLs  []string           `json:"discovered_urls,omitempty"`
-	Name            *string            `json:"name,omitempty"`
-	Method          *string            `json:"method,omitempty"`
-	ProdID          *string            `json:"prodid,omitempty"`
-	Color           *string            `json:"color,omitempty"`
-	Source          *string            `json:"source,omitempty"`
-	RefreshInterval *string            `json:"refresh_interval,omitempty"`
-	Categories      []string           `json:"categories,omitempty"`
-	Contacts        []string           `json:"contacts,omitempty"`
-	Images          []ImageInfo        `json:"images,omitempty"`
-	Events          []EventInfo        `json:"events"`
-	VCards          []VCard            `json:"vcards,omitempty"`
-	Description     *string            `json:"description,omitempty"`
-	URL             *string            `json:"url,omitempty"`
-	Calscale        *string            `json:"calscale,omitempty"`
-	TimezoneID      *string            `json:"timezone_id,omitempty"`
-	Timezones       []TimezoneInfo     `json:"timezones,omitempty"`
-	Todos           []TodoInfo         `json:"todos,omitempty"`
-	FreeBusy        []FreeBusyInfo     `json:"freebusy,omitempty"`
-	Availabilities  []AvailabilityInfo `json:"availabilities,omitempty"`
-	Journals        []JournalInfo      `json:"journals,omitempty"`
+	DiscoveredURLs        []string               `json:"discovered_urls,omitempty"`
+	Name                  *string                `json:"name,omitempty"`
+	Method                *string                `json:"method,omitempty"`
+	ProdID                *string                `json:"prodid,omitempty"`
+	Color                 *string                `json:"color,omitempty"`
+	Source                *string                `json:"source,omitempty"`
+	RefreshInterval       *string                `json:"refresh_interval,omitempty"`
+	Categories            []string               `json:"categories,omitempty"`
+	Contacts              []string               `json:"contacts,omitempty"`
+	Images                []ImageInfo            `json:"images,omitempty"`
+	Events                []EventInfo            `json:"events"`
+	VCards                []VCard                `json:"vcards,omitempty"`
+	Description           *string                `json:"description,omitempty"`
+	URL                   *string                `json:"url,omitempty"`
+	Calscale              *string                `json:"calscale,omitempty"`
+	TimezoneID            *string                `json:"timezone_id,omitempty"`
+	Timezones             []TimezoneInfo         `json:"timezones,omitempty"`
+	Todos                 []TodoInfo             `json:"todos,omitempty"`
+	FreeBusy              []FreeBusyInfo         `json:"freebusy,omitempty"`
+	Availabilities        []AvailabilityInfo     `json:"availabilities,omitempty"`
+	Journals              []JournalInfo          `json:"journals,omitempty"`
+	AutoprocessingSignals *AutoprocessingSignals `json:"autoprocessing_signals,omitempty"`
 }
 
 func (c *CalendarInfo) Manifest() map[string]any {
@@ -136,45 +138,49 @@ func (c *CalendarInfo) Manifest() map[string]any {
 	if len(c.Images) > 0 {
 		calendarMeta["images"] = c.Images
 	}
+	if c.AutoprocessingSignals != nil {
+		calendarMeta["autoprocessing_signals"] = c.AutoprocessingSignals
+	}
 	out := map[string]any{
 		"calendar": calendarMeta,
 	}
 	type ev struct {
-		UID             *string             `json:"uid,omitempty"`
-		Summary         string              `json:"summary"`
-		DTStart         *time.Time          `json:"dtstart,omitempty"`
-		DTEnd           *time.Time          `json:"dtend,omitempty"`
-		Location        *string             `json:"location,omitempty"`
-		Description     *string             `json:"description,omitempty"`
-		DescriptionHTML *string             `json:"description_html,omitempty"`
-		Organizer       *string             `json:"organizer,omitempty"`
-		Status          *string             `json:"status,omitempty"`
-		Attendees       []Attendee          `json:"attendees,omitempty"`
-		Attachments     []AttachmentInfo    `json:"attachments"`
-		VCards          []VCard             `json:"vcards,omitempty"`
-		Alarms          []AlarmInfo         `json:"alarms,omitempty"`
-		Categories      []string            `json:"categories,omitempty"`
-		Resources       []string            `json:"resources,omitempty"`
-		Contacts        []string            `json:"contacts,omitempty"`
-		Comments        []string            `json:"comments,omitempty"`
-		RelatedTo       []string            `json:"related_to,omitempty"`
-		RequestStatuses []string            `json:"request_statuses,omitempty"`
-		Images          []ImageInfo         `json:"images,omitempty"`
-		Conferences     []ConferenceInfo    `json:"conferences,omitempty"`
-		Recurrence      *RecurrenceInfo     `json:"recurrence,omitempty"`
-		Transparency    *string             `json:"transparency,omitempty"`
-		Priority        *int                `json:"priority,omitempty"`
-		Class           *string             `json:"class,omitempty"`
-		Color           *string             `json:"color,omitempty"`
-		Geo             *GeoPoint           `json:"geo,omitempty"`
-		URL             *string             `json:"url,omitempty"`
-		Created         *time.Time          `json:"created,omitempty"`
-		LastModified    *time.Time          `json:"last_modified,omitempty"`
-		DateTimeStamp   *time.Time          `json:"dtstamp,omitempty"`
-		Sequence        *int                `json:"sequence,omitempty"`
-		Duration        *string             `json:"duration,omitempty"`
-		RawProps        map[string][]string `json:"raw_props"`
-		DiscoveredURLs  []string            `json:"discovered_urls,omitempty"`
+		UID                   *string                `json:"uid,omitempty"`
+		Summary               string                 `json:"summary"`
+		DTStart               *time.Time             `json:"dtstart,omitempty"`
+		DTEnd                 *time.Time             `json:"dtend,omitempty"`
+		Location              *string                `json:"location,omitempty"`
+		Description           *string                `json:"description,omitempty"`
+		DescriptionHTML       *string                `json:"description_html,omitempty"`
+		Organizer             *string                `json:"organizer,omitempty"`
+		Status                *string                `json:"status,omitempty"`
+		Attendees             []Attendee             `json:"attendees,omitempty"`
+		Attachments           []AttachmentInfo       `json:"attachments"`
+		VCards                []VCard                `json:"vcards,omitempty"`
+		Alarms                []AlarmInfo            `json:"alarms,omitempty"`
+		Categories            []string               `json:"categories,omitempty"`
+		Resources             []string               `json:"resources,omitempty"`
+		Contacts              []string               `json:"contacts,omitempty"`
+		Comments              []string               `json:"comments,omitempty"`
+		RelatedTo             []string               `json:"related_to,omitempty"`
+		RequestStatuses       []string               `json:"request_statuses,omitempty"`
+		Images                []ImageInfo            `json:"images,omitempty"`
+		Conferences           []ConferenceInfo       `json:"conferences,omitempty"`
+		Recurrence            *RecurrenceInfo        `json:"recurrence,omitempty"`
+		Transparency          *string                `json:"transparency,omitempty"`
+		Priority              *int                   `json:"priority,omitempty"`
+		Class                 *string                `json:"class,omitempty"`
+		Color                 *string                `json:"color,omitempty"`
+		Geo                   *GeoPoint              `json:"geo,omitempty"`
+		URL                   *string                `json:"url,omitempty"`
+		Created               *time.Time             `json:"created,omitempty"`
+		LastModified          *time.Time             `json:"last_modified,omitempty"`
+		DateTimeStamp         *time.Time             `json:"dtstamp,omitempty"`
+		Sequence              *int                   `json:"sequence,omitempty"`
+		Duration              *string                `json:"duration,omitempty"`
+		RawProps              map[string][]string    `json:"raw_props"`
+		DiscoveredURLs        []string               `json:"discovered_urls,omitempty"`
+		AutoprocessingSignals *AutoprocessingSignals `json:"autoprocessing_signals,omitempty"`
 	}
 	type td struct {
 		UID             *string             `json:"uid,omitempty"`
@@ -285,6 +291,7 @@ func (c *CalendarInfo) Manifest() map[string]any {
 			Class: e.Class, Color: e.Color, Geo: e.Geo, URL: e.URL, Created: e.Created, LastModified: e.LastModified,
 			DateTimeStamp: e.DateTimeStamp, Sequence: e.Sequence, Duration: e.Duration,
 			RawProps: e.RawProps, DiscoveredURLs: e.DiscoveredURLs,
+			AutoprocessingSignals: e.AutoprocessingSignals,
 		})
 	}
 	out["events"] = events
@@ -410,9 +417,11 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 	}
 
 	var cal CalendarInfo
+	var calLevelProps map[string]string
 	var inEvent bool
 	var cur map[string]string
 	var ev EventInfo
+	var organizerParams map[string]string
 	var inTodo bool
 	var curTodo map[string]string
 	var todo TodoInfo
@@ -438,6 +447,7 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 		if strings.HasPrefix(line, "BEGIN:VEVENT") {
 			inEvent = true
 			cur = map[string]string{}
+			organizerParams = map[string]string{}
 			ev = EventInfo{
 				Summary:         "Untitled",
 				Attachments:     []AttachmentInfo{},
@@ -487,6 +497,8 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 					ev.Status = ptr(cleaned)
 				}
 			}
+			// Analyze autoprocessing signals before appending event
+			analyzeAutoprocessingSignals(&ev, organizerParams, cal.Method, calLevelProps)
 			if len(cal.Events) >= maxEvents {
 				return nil, fmt.Errorf("too many events in calendar (max %d)", maxEvents)
 			}
@@ -700,6 +712,17 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 
 		if !inEvent && !inTodo && !inFreebusy && !inJournal {
 			name, params, value := splitProp(line)
+			upperName := strings.ToUpper(name)
+			// Initialize calendar-level properties map on first use
+			if calLevelProps == nil {
+				calLevelProps = make(map[string]string)
+			}
+			// Capture vendor-specific properties at calendar level
+			if strings.HasPrefix(upperName, "X-MICROSOFT-") || strings.HasPrefix(upperName, "X-MS-") || strings.HasPrefix(upperName, "X-GOOGLE-") {
+				if value != "" {
+					calLevelProps[upperName] = value
+				}
+			}
 			switch name {
 			case "PRODID":
 				if value != "" {
@@ -769,8 +792,14 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 			switch up {
 			case "DESCRIPTION":
 				descEvent.absorbDescription(value)
-			case "UID", "SUMMARY", "LOCATION", "ORGANIZER", "STATUS":
+			case "UID", "SUMMARY", "LOCATION", "STATUS":
 				cur[up] = value
+			case "ORGANIZER":
+				cur[up] = value
+				// Store ORGANIZER parameters for autoprocessing signal analysis
+				for k, v := range params {
+					organizerParams[k] = v
+				}
 			case "X-ALT-DESC":
 				descEvent.absorbAltDescription(value, params)
 				ev.RawProps = addRawProp(ev.RawProps, up, value)
@@ -1210,6 +1239,8 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 			j--
 		}
 	}
+	// Analyze calendar-level autoprocessing signals
+	analyzeCalendarAutoprocessingSignals(&cal, calLevelProps)
 	return &cal, nil
 }
 
@@ -1438,6 +1469,256 @@ func stripMailto(s string) string {
 		return strings.TrimSpace(s)[7:]
 	}
 	return strings.TrimSpace(s)
+}
+
+// isLegitMeetingURL checks if a URL is from a legitimate meeting service domain.
+// It properly parses the URL and validates the hostname to prevent bypasses like:
+// - http://evil.com?fake=zoom.us (zoom.us in query string)
+// - http://malicious-zoom.us.attacker.com (zoom.us as subdomain component)
+func isLegitMeetingURL(urlStr string) bool {
+	parsed, err := url.Parse(urlStr)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return false
+	}
+
+	hostname := strings.ToLower(parsed.Hostname())
+	path := strings.ToLower(parsed.EscapedPath())
+
+	// Check if hostname matches legitimate meeting domains
+	// zoom.us - Accept any path (entire domain is meeting service)
+	if hostname == "zoom.us" || strings.HasSuffix(hostname, ".zoom.us") {
+		return true
+	}
+
+	// webex.com - Accept any path (entire domain is meeting service)
+	if hostname == "webex.com" || strings.HasSuffix(hostname, ".webex.com") {
+		return true
+	}
+
+	// freeconference.com - Accept any path (entire domain is meeting service)
+	if hostname == "freeconference.com" || strings.HasSuffix(hostname, ".freeconference.com") {
+		return true
+	}
+
+	// meet.google.com - Only accept meeting paths (not linkredirect or other redirects)
+	if (hostname == "meet.google.com" || strings.HasSuffix(hostname, ".meet.google.com")) &&
+		!strings.Contains(path, "linkredirect") {
+		return true
+	}
+
+	// teams.microsoft.com - Only accept the meetup-join path
+	if (hostname == "teams.microsoft.com" || strings.HasSuffix(hostname, ".teams.microsoft.com")) &&
+		strings.Contains(path, "/l/meetup-join/") {
+		return true
+	}
+
+	return false
+}
+
+// extractRedirectTarget attempts to extract the destination URL from a redirect parameter
+// Returns the target URL if found, empty string otherwise
+// For Google URLs, uses specialized logic to handle nested redirect chains
+func extractRedirectTarget(urlStr string) string {
+	// Check if this is a Google URL first - use specialized extraction
+	if strings.Contains(strings.ToLower(urlStr), "google.") {
+		if final, _, ok := unwrapGoogleRedirect(urlStr, 5); ok && final != "" {
+			return final
+		}
+	}
+
+	// Generic redirect parameter extraction for non-Google URLs
+	redirectParams := []string{
+		"redirect=", "redirect_uri=", "redirect_url=",
+		"url=", "uri=", "link=", "goto=", "go=",
+		"next=", "next_url=", "continue=", "continueto=",
+		"return=", "returnto=", "return_url=", "returnurl=",
+		"dest=", "destination=", "target=", "to=",
+		"redir=", "rurl=", "forward=", "forward_url=",
+		"out=", "outurl=", "out_url=",
+	}
+
+	lowerURL := strings.ToLower(urlStr)
+
+	for _, param := range redirectParams {
+		idx := strings.Index(lowerURL, param)
+		if idx == -1 {
+			continue
+		}
+
+		// Extract the value after the parameter
+		startIdx := idx + len(param)
+		if startIdx >= len(urlStr) {
+			continue
+		}
+
+		// Find the end of the value (either & or end of string)
+		endIdx := strings.Index(urlStr[startIdx:], "&")
+		var targetURL string
+		if endIdx == -1 {
+			targetURL = urlStr[startIdx:]
+		} else {
+			targetURL = urlStr[startIdx : startIdx+endIdx]
+		}
+
+		// URL decode the target
+		if decoded, err := url.QueryUnescape(targetURL); err == nil {
+			targetURL = decoded
+		}
+
+		// Validate it looks like a URL
+		if strings.HasPrefix(targetURL, "http://") || strings.HasPrefix(targetURL, "https://") || strings.HasPrefix(targetURL, "//") {
+			return targetURL
+		}
+	}
+
+	return ""
+}
+
+// extractGoogleRedirectTargetOnce extracts the immediate attacker-controlled value
+// from Google redirect endpoints (q= for /search?btnI, continue= for logout endpoints)
+func extractGoogleRedirectTargetOnce(raw string) (target string, kind string, ok bool) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", "", false
+	}
+
+	host := strings.ToLower(u.Hostname())
+	// Match google.<tld> including google.co.uk, google.com.kw, etc.
+	if !strings.Contains(host, "google.") {
+		return "", "", false
+	}
+
+	q := u.Query()
+	path := u.EscapedPath()
+
+	// 1) /search?btnI...&q=... ("I'm Feeling Lucky" redirect)
+	if strings.EqualFold(path, "/search") {
+		if _, hasBtnI := q["btnI"]; hasBtnI {
+			if v := q.Get("q"); v != "" {
+				return v, "google_search_btnI_q", true
+			}
+		}
+	}
+
+	// 2) AppEngine logout: /_ah/logout?continue=...
+	if strings.EqualFold(path, "/_ah/logout") {
+		if v := q.Get("continue"); v != "" {
+			return v, "appengine_logout_continue", true
+		}
+	}
+
+	// 3) Accounts logout: /Logout?continue=... or /accounts/Logout?continue=...
+	if strings.EqualFold(path, "/Logout") || strings.EqualFold(path, "/accounts/Logout") {
+		if v := q.Get("continue"); v != "" {
+			return v, "accounts_logout_continue", true
+		}
+	}
+
+	return "", "", false
+}
+
+// unwrapGoogleRedirect follows nested continue= chains up to maxDepth
+// Returns the final target and whether extraction succeeded
+func unwrapGoogleRedirect(raw string, maxDepth int) (final string, chain []string, ok bool) {
+	cur := raw
+	for i := 0; i < maxDepth; i++ {
+		t, kind, hit := extractGoogleRedirectTargetOnce(cur)
+		if !hit || t == "" {
+			break
+		}
+		chain = append(chain, fmt.Sprintf("%s => %s", kind, t))
+		ok = true
+
+		// If target looks like a URL, keep unwrapping (handles nested continue=...)
+		if tu, err := url.Parse(t); err == nil && tu.Scheme != "" && tu.Host != "" {
+			cur = t
+			final = t
+			continue
+		}
+
+		// Otherwise stop (q= can be a domain or search string, not always a URL)
+		final = t
+		break
+	}
+	return final, chain, ok
+}
+
+// detectOpenRedirectPatterns checks a URL for open redirect indicators
+// Returns a list of detected patterns (empty if none found)
+// Note: Not all redirects are malicious - we focus on:
+//  1. Redirects in meeting URLs (Teams/Meet/conference contexts)
+//  2. Trusted domain abuse (using google.com/microsoft.com to bypass validation)
+func detectOpenRedirectPatterns(urlStr string) []string {
+	var patterns []string
+	lowerURL := strings.ToLower(urlStr)
+
+	// Check if this is supposed to be a meeting/conference URL
+	// These should be direct links, not redirectors
+	isMeetingContext := strings.Contains(lowerURL, "meet") ||
+		strings.Contains(lowerURL, "teams") ||
+		strings.Contains(lowerURL, "zoom") ||
+		strings.Contains(lowerURL, "webex") ||
+		strings.Contains(lowerURL, "join")
+
+	// Common open redirect query parameters
+	// Only flag these if in a meeting context OR using a trusted domain
+	redirectParams := []string{
+		"redirect=", "redirect_uri=", "redirect_url=",
+		"url=", "uri=", "link=", "goto=", "go=",
+		"next=", "next_url=", "continue=", "continueto=",
+		"return=", "returnto=", "return_url=", "returnurl=",
+		"dest=", "destination=", "target=", "to=",
+		"redir=", "rurl=", "forward=", "forward_url=",
+		"out=", "outurl=", "out_url=",
+	}
+
+	isTrustedDomain := strings.Contains(lowerURL, "google.com") ||
+		strings.Contains(lowerURL, "microsoft.com") ||
+		strings.Contains(lowerURL, "office.com")
+
+	// Only flag redirect parameters if it's suspicious context
+	if isMeetingContext || isTrustedDomain {
+		for _, param := range redirectParams {
+			if strings.Contains(lowerURL, param) {
+				if isTrustedDomain {
+					patterns = append(patterns, fmt.Sprintf("Redirect parameter on trusted domain: %s (may be abusing domain trust to bypass validation)", param))
+				} else if isMeetingContext {
+					patterns = append(patterns, fmt.Sprintf("Redirect parameter in meeting URL: %s (meeting links should be direct, not redirectors)", param))
+				}
+				break // Only report once per URL
+			}
+		}
+	}
+
+	// Known Google open redirect endpoints used in bypass chains
+	// Key insight: Google Calendar TRUSTS google.com domains, so attackers abuse
+	// open redirects on Google's own services to redirect to malicious sites
+	// Attack flow: Meet/Calendar (trusted) → Docs redirect (trusted) → Attacker (malicious)
+	googleRedirectIndicators := map[string]string{
+		"meet.google.com/linkredirect": "Google Meet linkredirect - trusted domain used to redirect to arbitrary URLs",
+		"docs.google.com/open?":         "Google Docs open redirect - trusted domain abused to bypass URL validation",
+		"google.com/url?":               "Google URL redirector - trusted domain used for redirect chain",
+		"www.google.com/url?":           "Google URL redirector - trusted domain used for redirect chain",
+	}
+
+	for indicator, explanation := range googleRedirectIndicators {
+		if strings.Contains(lowerURL, indicator) {
+			patterns = append(patterns, fmt.Sprintf("TRUSTED DOMAIN ABUSE: %s (%s bypasses calendar client trust checks)", indicator, explanation))
+		}
+	}
+
+	// Check for URL-encoded URLs within the URL (nested redirect)
+	if strings.Contains(lowerURL, "%3a%2f%2f") || strings.Contains(lowerURL, "%3A%2F%2F") {
+		patterns = append(patterns, "URL-encoded URL detected within URL (potential redirect chain)")
+	}
+
+	// Check for double-URL pattern (http...http)
+	httpCount := strings.Count(lowerURL, "http")
+	if httpCount > 1 {
+		patterns = append(patterns, fmt.Sprintf("Multiple URLs detected (%d http occurrences) - possible redirect chain", httpCount))
+	}
+
+	return patterns
 }
 
 func parseCalAddressList(raw string) []string {
@@ -2058,4 +2339,659 @@ func PopulateDiscoveredURLs(c *CalendarInfo) {
 		add(*c.URL)
 	}
 	c.DiscoveredURLs = agg
+}
+
+// parseOrganizerWithParams extracts organizer value and parameters for spoofing detection
+func parseOrganizerWithParams(value string, params map[string]string) *OrganizerInfo {
+	if value == "" {
+		return nil
+	}
+
+	orgInfo := &OrganizerInfo{
+		Value: value,
+	}
+
+	if cn := params["CN"]; cn != "" {
+		orgInfo.CN = ptr(cn)
+	}
+
+	if sentBy := params["SENT-BY"]; sentBy != "" {
+		normalized := stripMailto(trimQuotes(strings.TrimSpace(sentBy)))
+		if normalized != "" {
+			orgInfo.SentBy = ptr(normalized)
+		}
+	}
+
+	if dir := params["DIR"]; dir != "" {
+		directory := trimQuotes(dir)
+		if directory != "" {
+			orgInfo.Directory = ptr(directory)
+		}
+	}
+
+	return orgInfo
+}
+
+// analyzeAutoprocessingSignals examines an event for security-relevant patterns
+func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]string, calMethod *string, calLevelProps map[string]string) {
+	signals := &AutoprocessingSignals{
+		MicrosoftHeaders:   make(map[string]string),
+		GoogleHeaders:      make(map[string]string),
+		SuspiciousPatterns: []string{},
+	}
+
+	// Note: Calendar-level vendor properties are handled separately in analyzeCalendarAutoprocessingSignals
+	// But we store them here too for combination detection
+	// Add calendar-level Microsoft headers to signals for combination detection
+	if calLevelProps != nil {
+		for k, v := range calLevelProps {
+			if strings.HasPrefix(k, "X-MICROSOFT-") || strings.HasPrefix(k, "X-MS-") {
+				signals.MicrosoftHeaders[k] = v
+			}
+		}
+	}
+
+	// Parse organizer details if present
+	if ev.Organizer != nil && *ev.Organizer != "" {
+		signals.OrganizerDetails = parseOrganizerWithParams(*ev.Organizer, organizerParams)
+
+		// Check for SENT-BY mismatch (potential spoofing)
+		if signals.OrganizerDetails != nil && signals.OrganizerDetails.SentBy != nil {
+			orgEmail := stripMailto(*ev.Organizer)
+			sentByEmail := *signals.OrganizerDetails.SentBy
+			if orgEmail != sentByEmail {
+				signals.HasSentByMismatch = true
+				signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+					fmt.Sprintf("ORGANIZER SENT-BY mismatch: organizer=%s, sent-by=%s", orgEmail, sentByEmail))
+			}
+		}
+	}
+
+	// Check for high sequence number (potential meeting hijacking)
+	if ev.Sequence != nil && *ev.Sequence > 10 {
+		signals.HasHighSequence = true
+		signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			fmt.Sprintf("High SEQUENCE value (%d) may indicate meeting update hijacking", *ev.Sequence))
+	}
+
+	// Check for URL in LOCATION field (Gmail bypass per Tarlogic research)
+	// Gmail sanitizes X-GOOGLE-CONFERENCE but renders LOCATION URLs as clickable
+	// Only flag if it's NOT a legitimate direct meeting link
+	if ev.Location != nil && strings.Contains(*ev.Location, "http") {
+		// Extract URLs from the location field (may contain text + URL like "Register here: https://...")
+		urlPattern := regexp.MustCompile(`https?://[^\s"'\]\},]+`)
+		foundURLs := urlPattern.FindAllString(*ev.Location, -1)
+
+		// Check if ALL found URLs are legitimate meeting URLs
+		allLegit := true
+		for _, u := range foundURLs {
+			if !isLegitMeetingURL(u) {
+				allLegit = false
+				break
+			}
+		}
+
+		// Also check for open redirect patterns in the location URL
+		hasRedirectPatterns := false
+		for _, pattern := range detectOpenRedirectPatterns(*ev.Location) {
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				fmt.Sprintf("Open redirect in LOCATION: %s - %s", *ev.Location, pattern))
+			hasRedirectPatterns = true
+		}
+
+		// Only flag URL in LOCATION if it's suspicious (not all legitimate meeting links OR has redirects)
+		if !allLegit || hasRedirectPatterns {
+			if !hasRedirectPatterns {
+				// Only add the generic warning if we haven't already added redirect warnings
+				signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+					fmt.Sprintf("URL in LOCATION field: %s - verify this is a legitimate meeting link", *ev.Location))
+			}
+		}
+
+		// Extract and store redirect target
+		if target := extractRedirectTarget(*ev.Location); target != "" {
+			signals.RedirectTargets = append(signals.RedirectTargets, target)
+		}
+	}
+
+	// Check for auto-accept/auto-add spoofing via PARTSTAT on incoming requests
+	// Note: Only flag on SEQUENCE=0 (original invitation). Updates (SEQUENCE>0) preserve real responses.
+	if calMethod != nil && strings.ToUpper(*calMethod) == "REQUEST" {
+		// Get organizer email for comparison (strip mailto: prefix)
+		organizerEmail := ""
+		if ev.Organizer != nil {
+			organizerEmail = stripMailto(*ev.Organizer)
+		}
+
+		// Check if this is an original invitation or an update
+		isOriginalInvite := (ev.Sequence == nil || *ev.Sequence == 0)
+
+		for _, attendee := range ev.Attendees {
+			// Skip organizer's own status (organizers often have ACCEPTED on their own meetings)
+			attendeeEmail := stripMailto(attendee.Mailto)
+			isOrganizer := (organizerEmail != "" && attendeeEmail == organizerEmail)
+
+			if attendee.PartStat != nil {
+				partstat := strings.ToUpper(*attendee.PartStat)
+				// Only flag ACCEPTED/TENTATIVE on ORIGINAL invitations (SEQUENCE=0)
+				// Updates (SEQUENCE>0) legitimately preserve attendees' previous responses
+				if partstat == "ACCEPTED" && !isOrganizer && isOriginalInvite {
+					signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+						fmt.Sprintf("Auto-accept spoofing: PARTSTAT=ACCEPTED on incoming REQUEST for %s", attendee.Mailto))
+					signals.HasSentByMismatch = true // Mark as critical
+				} else if partstat == "TENTATIVE" && !isOrganizer && isOriginalInvite {
+					signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+						fmt.Sprintf("Auto-tentative spoofing: PARTSTAT=TENTATIVE on incoming REQUEST for %s", attendee.Mailto))
+				}
+			}
+			// Check for RSVP=FALSE on incoming invites (response suppression)
+			if attendee.RSVP != nil && strings.ToUpper(*attendee.RSVP) == "FALSE" {
+				signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+					"RSVP=FALSE on incoming REQUEST - response suppression detected")
+			}
+		}
+	}
+
+	// Check for STATUS field spoofing on incoming REQUEST (per Tarlogic research)
+	// Note: STATUS:CONFIRMED is common in legitimate calendars (Google Calendar sets this by default)
+	// Only flag STATUS:TENTATIVE as it's less common and more suspicious
+	if calMethod != nil && strings.ToUpper(*calMethod) == "REQUEST" {
+		if ev.Status != nil {
+			status := strings.ToUpper(*ev.Status)
+			// STATUS:CONFIRMED removed - too common in legitimate calendars
+			if status == "TENTATIVE" {
+				signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+					"STATUS:TENTATIVE on incoming REQUEST - event appears pre-acknowledged (less common, verify legitimacy)")
+			}
+		}
+	}
+
+	// Check for VALARM notification manipulation (per Tarlogic research)
+	// Attackers can use strategic alarm timing to draw attention before phishing
+	if len(ev.Alarms) > 0 {
+		displayAlarms := 0
+		absoluteTimeAlarms := 0
+		for _, alarm := range ev.Alarms {
+			if alarm.Action != nil && strings.ToUpper(*alarm.Action) == "DISPLAY" {
+				displayAlarms++
+			}
+			// Check for absolute-time triggers (DATE-TIME value instead of relative duration)
+			if alarm.Trigger != nil && alarm.Trigger.Time != nil {
+				absoluteTimeAlarms++
+			}
+		}
+		if len(ev.Alarms) > 3 {
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				fmt.Sprintf("Multiple alarms (%d) - potential notification spam", len(ev.Alarms)))
+		}
+		if absoluteTimeAlarms > 0 {
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				fmt.Sprintf("Absolute-time alarm trigger(s) (%d) - attacker-controlled notification timing", absoluteTimeAlarms))
+		}
+		if displayAlarms > 0 && calMethod != nil && strings.ToUpper(*calMethod) == "REQUEST" {
+			signals.InformationalPatterns = append(signals.InformationalPatterns,
+				fmt.Sprintf("DISPLAY alarm(s) (%d) - popup notifications will appear before meeting", displayAlarms))
+		}
+	}
+
+	// Check for duration anomalies
+	if ev.DTStart != nil && ev.DTEnd != nil {
+		duration := ev.DTEnd.Sub(*ev.DTStart)
+		if duration < 5*time.Minute && duration > 0 {
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				fmt.Sprintf("Very short event duration (%v) - minimal visibility spam", duration))
+		}
+	}
+
+	// Check for CLASS manipulation (per RFC 5545 and Tarlogic research)
+	if ev.Class != nil {
+		class := strings.ToUpper(*ev.Class)
+		if class == "PRIVATE" || class == "CONFIDENTIAL" {
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				fmt.Sprintf("CLASS:%s - event marked as sensitive (may reduce scrutiny or affect sharing/visibility)", class))
+		}
+	}
+
+	// Check for PRIORITY manipulation
+	if ev.Priority != nil {
+		priority := *ev.Priority
+		// Priority 1 = highest, 9 = lowest, 0 = undefined per RFC 5545
+		if priority == 1 {
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				"PRIORITY:1 (Highest) - urgency manipulation to prompt immediate action")
+		} else if priority >= 2 && priority <= 4 {
+			// PRIORITY 2-4 is common in legitimate meetings (conference calls, important meetings)
+			signals.InformationalPatterns = append(signals.InformationalPatterns,
+				fmt.Sprintf("PRIORITY:%d (High) - meeting marked with elevated priority", priority))
+		}
+	}
+
+	// Check for TRANSP (transparency) manipulation
+	// Note: TRANSP:OPAQUE is the DEFAULT value per RFC 5545 (means "busy")
+	// TRANSP:TRANSPARENT means "free" - only flag unusual cases if needed
+	// Removed OPAQUE check as it causes too many false positives on legitimate calendars
+
+	// Extract Microsoft-specific headers from RawProps
+	for key, values := range ev.RawProps {
+		if strings.HasPrefix(key, "X-MICROSOFT-") || strings.HasPrefix(key, "X-MS-") {
+			if len(values) > 0 {
+				signals.MicrosoftHeaders[key] = values[0]
+			}
+		}
+		if strings.HasPrefix(key, "X-GOOGLE-") {
+			if len(values) > 0 {
+				signals.GoogleHeaders[key] = values[0]
+			}
+		}
+	}
+
+	// Check for urgency spoofing via Microsoft importance
+	if importance, ok := signals.MicrosoftHeaders["X-MICROSOFT-CDO-IMPORTANCE"]; ok {
+		if importance == "2" {
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				"High priority/importance spoofing via X-MICROSOFT-CDO-IMPORTANCE:2")
+		}
+	}
+
+	// Check for fake attachment indicator
+	if hasAttach, ok := signals.MicrosoftHeaders["X-MS-HAS-ATTACH"]; ok {
+		if strings.ToUpper(hasAttach) == "YES" {
+			// Check if there are actual attachments
+			if len(ev.Attachments) == 0 {
+				signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+					"Fake attachment indicator: X-MS-Has-Attach:YES without actual attachments")
+			}
+		}
+	}
+
+	// Check for response suppression
+	if isResponseRequested, ok := signals.MicrosoftHeaders["X-MICROSOFT-ISRESPONSEREQUESTED"]; ok {
+		if strings.ToUpper(isResponseRequested) == "FALSE" {
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				"Response suppression: X-MICROSOFT-ISRESPONSEREQUESTED:FALSE")
+		}
+	}
+
+	// Note common Microsoft headers (informational, not necessarily suspicious)
+	if busyStatus, ok := signals.MicrosoftHeaders["X-MICROSOFT-CDO-BUSYSTATUS"]; ok {
+		signals.InformationalPatterns = append(signals.InformationalPatterns,
+			fmt.Sprintf("Microsoft busy/free status: X-MICROSOFT-CDO-BUSYSTATUS=%s", busyStatus))
+	}
+
+	if intendedStatus, ok := signals.MicrosoftHeaders["X-MICROSOFT-CDO-INTENDEDSTATUS"]; ok {
+		signals.InformationalPatterns = append(signals.InformationalPatterns,
+			fmt.Sprintf("Microsoft intended status: X-MICROSOFT-CDO-INTENDEDSTATUS=%s", intendedStatus))
+	}
+
+	if forceInspector, ok := signals.MicrosoftHeaders["X-MS-OLK-FORCEINSPECTOROPEN"]; ok {
+		if strings.ToUpper(forceInspector) == "TRUE" {
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				"Force Inspector Open: X-MS-OLK-FORCEINSPECTOROPEN=TRUE (forces Outlook to open in full window, can bypass quick preview security)")
+		}
+	}
+
+	if apptSeq, ok := signals.MicrosoftHeaders["X-MS-OLK-APPTLASTSEQUENCE"]; ok {
+		signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			fmt.Sprintf("Appointment sequence manipulation: X-MS-OLK-APPTLASTSEQUENCE=%s (can be used to override legitimate meeting updates)", apptSeq))
+	}
+
+	if allDay, ok := signals.MicrosoftHeaders["X-MICROSOFT-CDO-ALLDAYEVENT"]; ok {
+		if strings.ToUpper(allDay) == "TRUE" {
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				"All-day event flag: X-MICROSOFT-CDO-ALLDAYEVENT=TRUE (all-day events may have less scrutiny or different display behavior)")
+		}
+	}
+
+	// Check for explicit Teams meeting URL hijacking (primary attack vector per Tarlogic research)
+	if teamsURL, ok := signals.MicrosoftHeaders["X-MICROSOFT-SKYPETEAMSMEETINGURL"]; ok {
+		lowerTeamsURL := strings.ToLower(teamsURL)
+		// Legitimate Teams URLs: https://teams.microsoft.com/l/meetup-join/...
+		// Only flag if it's NOT a legitimate Teams domain or contains redirect parameters
+		isLegitTeamsURL := strings.HasPrefix(lowerTeamsURL, "https://teams.microsoft.com/l/meetup-join/")
+
+		if !isLegitTeamsURL {
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				fmt.Sprintf("⚠️ TEAMS URL HIJACKING: X-MICROSOFT-SKYPETEAMSMEETINGURL=%s - Outlook renders as clickable 'Join Teams Meeting' button without validation (expected teams.microsoft.com, got non-Teams URL)", teamsURL))
+		}
+
+		// Always check for open redirect patterns, even in legitimate domains
+		for _, pattern := range detectOpenRedirectPatterns(teamsURL) {
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				fmt.Sprintf("Open redirect in Teams URL: %s", pattern))
+		}
+		// Extract redirect target
+		if target := extractRedirectTarget(teamsURL); target != "" {
+			signals.RedirectTargets = append(signals.RedirectTargets, target)
+		}
+	}
+
+	// Flag other suspicious Teams/Meet URLs in Microsoft/Google headers
+	if len(signals.MicrosoftHeaders) > 0 {
+		// Standard Microsoft Teams headers that are not suspicious
+		standardTeamsHeaders := map[string]bool{
+			"X-MICROSOFT-SKYPETEAMSPROPERTIES":        true,
+			"X-MICROSOFT-ONLINEMEETINGCONFERENCEID":   true,
+			"X-MICROSOFT-ONLINEMEETINGINFORMATION":    true,
+			"X-MICROSOFT-ONLINEMEETINGTOLLNUMBER":     true,
+			"X-MICROSOFT-DONOTFORWARDMEETING":         true,
+			"X-MICROSOFT-SCHEDULINGSERVICEUPDATEURL":  true,
+			"X-MICROSOFT-CDO-OWNERAPPTID":             true,
+		}
+
+		for key, val := range signals.MicrosoftHeaders {
+			// Skip SKYPETEAMSMEETINGURL since we already flagged it above
+			if key == "X-MICROSOFT-SKYPETEAMSMEETINGURL" {
+				continue
+			}
+
+			// Skip standard Teams headers (don't flag as suspicious)
+			if standardTeamsHeaders[key] {
+				continue
+			}
+
+			// Only flag unusual Teams/Meeting headers
+			if strings.Contains(strings.ToUpper(key), "MEETING") || strings.Contains(strings.ToUpper(key), "TEAMS") {
+				signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+					fmt.Sprintf("Unusual Microsoft Teams meeting header: %s", key))
+			}
+
+			// Check for suspicious domains in URLs
+			if strings.Contains(val, "http") {
+				// Extract URLs from the value (may be embedded in JSON like X-MICROSOFT-LOCATIONS)
+				urlPattern := regexp.MustCompile(`https?://[^\s"'\]\},]+`)
+				foundURLs := urlPattern.FindAllString(val, -1)
+
+				// Skip X-MICROSOFT-LOCATIONS if it contains ONLY legitimate meeting URLs
+				// Microsoft Outlook stores meeting URLs in the DisplayName field of this JSON property
+				isLocationsWithLegitURL := false
+				if key == "X-MICROSOFT-LOCATIONS" && len(foundURLs) > 0 {
+					allLegit := true
+					for _, u := range foundURLs {
+						if !isLegitMeetingURL(u) {
+							allLegit = false
+							break
+						}
+					}
+					isLocationsWithLegitURL = allLegit
+				}
+
+				if !isLocationsWithLegitURL {
+					signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+						fmt.Sprintf("URL in Microsoft header %s: %s", key, val))
+				}
+
+				// Check for open redirect patterns
+				for _, pattern := range detectOpenRedirectPatterns(val) {
+					signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+						fmt.Sprintf("Open redirect in %s: %s", key, pattern))
+				}
+				// Extract redirect target
+				if target := extractRedirectTarget(val); target != "" {
+					signals.RedirectTargets = append(signals.RedirectTargets, target)
+				}
+			}
+		}
+	}
+
+	if len(signals.GoogleHeaders) > 0 {
+		for key, val := range signals.GoogleHeaders {
+			if strings.Contains(strings.ToUpper(key), "CONFERENCE") || strings.Contains(strings.ToUpper(key), "MEET") {
+				// Check if this is actually a Google Meet URL or a redirect
+				if strings.Contains(strings.ToLower(val), "meet.google.com") && !strings.Contains(strings.ToLower(val), "linkredirect") {
+					// Legitimate Google Meet URL - don't flag
+					continue
+				}
+				signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+					fmt.Sprintf("Google Meet conference header with non-standard URL: %s", key))
+			}
+			if strings.Contains(val, "http") {
+				// Check for open redirect patterns (Tarlogic bypass chain: Meet → Docs → attacker)
+				// Key insight: Google Calendar trusts google.com domains, so attackers abuse
+				// Google's own open redirects (like docs.google.com/open) to redirect to malicious sites
+				redirectPatterns := detectOpenRedirectPatterns(val)
+				if len(redirectPatterns) > 0 {
+					signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+						fmt.Sprintf("URL in Google header %s: %s", key, val))
+					for _, pattern := range redirectPatterns {
+						signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+							fmt.Sprintf("⚠️ TRUSTED DOMAIN BYPASS: %s - Google Calendar trusts google.com, allowing redirect chain to attacker", pattern))
+					}
+					// Extract redirect target
+					if target := extractRedirectTarget(val); target != "" {
+						signals.RedirectTargets = append(signals.RedirectTargets, target)
+					}
+				}
+			}
+		}
+	}
+
+	// Check discovered URLs for open redirect patterns
+	for _, discoveredURL := range ev.DiscoveredURLs {
+		for _, pattern := range detectOpenRedirectPatterns(discoveredURL) {
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				fmt.Sprintf("Open redirect in discovered URL (%s): %s", discoveredURL, pattern))
+		}
+		// Extract redirect target
+		if target := extractRedirectTarget(discoveredURL); target != "" {
+			signals.RedirectTargets = append(signals.RedirectTargets, target)
+		}
+	}
+
+	// === CRITICAL COMBINATION DETECTION ===
+	// Detect combinations of indicators that are almost always malicious (per Tarlogic research)
+
+	// Check for pre-accepted + meeting URL hijacking
+	hasPreAccepted := false
+	hasURLHijacking := false
+	hasOpenRedirect := false
+
+	for _, attendee := range ev.Attendees {
+		if attendee.PartStat != nil && strings.ToUpper(*attendee.PartStat) == "ACCEPTED" {
+			hasPreAccepted = true
+			break
+		}
+	}
+
+	if teamsURL, ok := signals.MicrosoftHeaders["X-MICROSOFT-SKYPETEAMSMEETINGURL"]; ok {
+		lowerTeamsURL := strings.ToLower(teamsURL)
+		if !strings.HasPrefix(lowerTeamsURL, "https://teams.microsoft.com/l/meetup-join/") {
+			hasURLHijacking = true
+		}
+	}
+
+	// Check if any open redirect patterns were detected
+	for _, pattern := range signals.SuspiciousPatterns {
+		if strings.Contains(pattern, "Open redirect") || strings.Contains(pattern, "TRUSTED DOMAIN BYPASS") {
+			hasOpenRedirect = true
+			break
+		}
+	}
+
+	if hasPreAccepted && (hasURLHijacking || hasOpenRedirect) {
+		signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			"🚨 CRITICAL COMBINATION: Pre-accepted meeting with malicious URL - meeting appears already accepted with hijacked meeting link (extremely suspicious)")
+	}
+
+	// Check for pre-accepted + response suppression + high priority
+	hasResponseSuppression := false
+	hasHighPriority := false
+
+	for _, attendee := range ev.Attendees {
+		if attendee.RSVP != nil && strings.ToUpper(*attendee.RSVP) == "FALSE" {
+			hasResponseSuppression = true
+			break
+		}
+	}
+
+	if _, ok := signals.MicrosoftHeaders["X-MICROSOFT-ISRESPONSEREQUESTED"]; ok {
+		hasResponseSuppression = true
+	}
+
+	if ev.Priority != nil && *ev.Priority >= 1 && *ev.Priority <= 4 {
+		hasHighPriority = true
+	}
+	if _, ok := signals.MicrosoftHeaders["X-MICROSOFT-CDO-IMPORTANCE"]; ok {
+		hasHighPriority = true
+	}
+
+	if hasPreAccepted && hasResponseSuppression && hasHighPriority {
+		signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			"🚨 CRITICAL COMBINATION: Pre-accepted + response suppression + high priority - urgent stealthy meeting that victim cannot RSVP to (strong phishing indicator)")
+	}
+
+	// Check for multiple alarms (notification spam)
+	// Combined with short duration makes it even more suspicious, but we'll flag just on alarm count
+	alarmCount := len(ev.Alarms)
+
+	if alarmCount > 3 {
+		signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			fmt.Sprintf("🚨 CRITICAL COMBINATION: %d alarms detected - notification spam attack (especially suspicious with short duration events)", alarmCount))
+	}
+
+	// Attach signals if there's suspicious activity or vendor headers to display
+	if signals.HasHighSequence || signals.HasSentByMismatch || len(signals.SuspiciousPatterns) > 0 ||
+		len(signals.MicrosoftHeaders) > 0 || len(signals.GoogleHeaders) > 0 {
+		ev.AutoprocessingSignals = signals
+	}
+}
+
+// analyzeCalendarAutoprocessingSignals examines calendar-level indicators
+func analyzeCalendarAutoprocessingSignals(cal *CalendarInfo, calLevelProps map[string]string) {
+	signals := &AutoprocessingSignals{
+		MicrosoftHeaders:   make(map[string]string),
+		GoogleHeaders:      make(map[string]string),
+		SuspiciousPatterns: []string{},
+	}
+
+	// Capture calendar-level vendor properties
+	if calLevelProps != nil {
+		for k, v := range calLevelProps {
+			if strings.HasPrefix(k, "X-MICROSOFT-") || strings.HasPrefix(k, "X-MS-") {
+				signals.MicrosoftHeaders[k] = v
+			} else if strings.HasPrefix(k, "X-GOOGLE-") {
+				signals.GoogleHeaders[k] = v
+			}
+		}
+	}
+
+	// Check METHOD field for suspicious values
+	// Note: METHOD:REQUEST is normal and should not be flagged
+	if cal.Method != nil {
+		method := strings.ToUpper(*cal.Method)
+		switch method {
+		case "CANCEL":
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				"Calendar METHOD:CANCEL - may attempt to remove legitimate meetings")
+		case "REPLY":
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				"Calendar METHOD:REPLY - verify this is from expected attendee")
+		case "PUBLISH":
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				"Calendar METHOD:PUBLISH - auto-subscription risk without user consent")
+		}
+	}
+
+	// Check for busy status manipulation
+	if busyStatus, ok := signals.MicrosoftHeaders["X-MICROSOFT-CDO-BUSYSTATUS"]; ok {
+		status := strings.ToUpper(busyStatus)
+		if status == "OOF" || status == "BUSY" || status == "TENTATIVE" {
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				fmt.Sprintf("Busy status manipulation: X-MICROSOFT-CDO-BUSYSTATUS:%s - may spoof recipient availability", busyStatus))
+		}
+	}
+
+	// Check for high importance/priority spoofing
+	if importance, ok := signals.MicrosoftHeaders["X-MICROSOFT-CDO-IMPORTANCE"]; ok {
+		if importance == "2" {
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				"High priority/importance spoofing via X-MICROSOFT-CDO-IMPORTANCE:2")
+		}
+	}
+
+	// Check for fake attachment indicator at calendar level
+	if hasAttach, ok := signals.MicrosoftHeaders["X-MS-HAS-ATTACH"]; ok {
+		if strings.ToUpper(hasAttach) == "YES" {
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				"Attachment indicator at calendar level: X-MS-Has-Attach:YES")
+		}
+	}
+
+	// Check for response suppression at calendar level
+	if isResponseRequested, ok := signals.MicrosoftHeaders["X-MICROSOFT-ISRESPONSEREQUESTED"]; ok {
+		if strings.ToUpper(isResponseRequested) == "FALSE" {
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				"Response suppression: X-MICROSOFT-ISRESPONSEREQUESTED:FALSE")
+		}
+	}
+
+	// Explain calendar-level Microsoft headers
+	if forceInspector, ok := signals.MicrosoftHeaders["X-MS-OLK-FORCEINSPECTOROPEN"]; ok {
+		if strings.ToUpper(forceInspector) == "TRUE" {
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				"Force Inspector Open: X-MS-OLK-FORCEINSPECTOROPEN=TRUE (forces Outlook to open in full window, can bypass quick preview security)")
+		}
+	}
+
+	if intendedStatus, ok := signals.MicrosoftHeaders["X-MICROSOFT-CDO-INTENDEDSTATUS"]; ok {
+		signals.InformationalPatterns = append(signals.InformationalPatterns,
+			fmt.Sprintf("Microsoft intended status at calendar level: X-MICROSOFT-CDO-INTENDEDSTATUS=%s", intendedStatus))
+	}
+
+	if apptSeq, ok := signals.MicrosoftHeaders["X-MS-OLK-APPTLASTSEQUENCE"]; ok {
+		signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			fmt.Sprintf("Appointment sequence at calendar level: X-MS-OLK-APPTLASTSEQUENCE=%s", apptSeq))
+	}
+
+	// Check for explicit Teams meeting URL hijacking at calendar level (primary attack vector per Tarlogic research)
+	if teamsURL, ok := signals.MicrosoftHeaders["X-MICROSOFT-SKYPETEAMSMEETINGURL"]; ok {
+		lowerTeamsURL := strings.ToLower(teamsURL)
+		// Legitimate Teams URLs: https://teams.microsoft.com/l/meetup-join/...
+		// Only flag if it's NOT a legitimate Teams domain
+		isLegitTeamsURL := strings.HasPrefix(lowerTeamsURL, "https://teams.microsoft.com/l/meetup-join/")
+
+		if !isLegitTeamsURL {
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				fmt.Sprintf("⚠️ TEAMS URL HIJACKING: X-MICROSOFT-SKYPETEAMSMEETINGURL=%s - Outlook renders as clickable 'Join Teams Meeting' button without validation (expected teams.microsoft.com, got non-Teams URL)", teamsURL))
+		}
+
+		// Always check for open redirect patterns, even in legitimate domains
+		for _, pattern := range detectOpenRedirectPatterns(teamsURL) {
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				fmt.Sprintf("Open redirect in Teams URL: %s", pattern))
+		}
+		// Extract redirect target
+		if target := extractRedirectTarget(teamsURL); target != "" {
+			signals.RedirectTargets = append(signals.RedirectTargets, target)
+		}
+	}
+
+	// Check Google headers for conference/meeting indicators
+	for key, val := range signals.GoogleHeaders {
+		if strings.Contains(strings.ToUpper(key), "CONFERENCE") || strings.Contains(strings.ToUpper(key), "MEET") {
+			// Check if this is actually a Google Meet URL or a redirect
+			if strings.Contains(strings.ToLower(val), "meet.google.com") && !strings.Contains(strings.ToLower(val), "linkredirect") {
+				// Legitimate Google Meet URL - don't flag
+				continue
+			}
+			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				fmt.Sprintf("Google Meet conference header with non-standard URL: %s", key))
+		}
+		if strings.Contains(val, "http") {
+			// Check for open redirect patterns (Tarlogic bypass chain: Meet → Docs → attacker)
+			redirectPatterns := detectOpenRedirectPatterns(val)
+			if len(redirectPatterns) > 0 {
+				signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+					fmt.Sprintf("URL in Google header %s: %s", key, val))
+				for _, pattern := range redirectPatterns {
+					signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+						fmt.Sprintf("⚠️ TRUSTED DOMAIN BYPASS: %s - Google Calendar trusts google.com, allowing redirect chain to attacker", pattern))
+				}
+			}
+		}
+	}
+
+	// Only attach if there are patterns or headers to report
+	if len(signals.SuspiciousPatterns) > 0 || len(signals.MicrosoftHeaders) > 0 || len(signals.GoogleHeaders) > 0 {
+		cal.AutoprocessingSignals = signals
+	}
 }

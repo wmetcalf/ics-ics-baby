@@ -1,0 +1,518 @@
+{
+  "test_suite_info": {
+    "name": "ICS Parser Security Test Suite",
+    "version": "1.0.0",
+    "description": "Benign test suite for testing ICS parsers against calendar phishing patterns, auto-accept vulnerabilities, and vendor-specific quirks",
+    "created_date": "2026-01-20",
+    "total_tests": 20,
+    "focus_areas": [
+      "Auto-accept/auto-add detection",
+      "Spoofed ORGANIZER fields",
+      "Microsoft Outlook-specific properties",
+      "Google Calendar extensions",
+      "Embedded URLs and links",
+      "Participation status manipulation",
+      "HTML content in descriptions",
+      "Recurrence patterns",
+      "Time zone handling",
+      "Calendar method abuse"
+    ]
+  },
+  "test_cases": [
+    {
+      "id": "01",
+      "filename": "01-basic-needs-action.ics",
+      "title": "Basic Standard Invite",
+      "risk_level": "Low",
+      "key_risks": [
+        "Standard REQUEST + PARTSTAT=NEEDS-ACTION"
+      ],
+      "expected_flags": [
+        "flag if sender untrusted",
+        "normal invite pattern"
+      ],
+      "parser_should_detect": [
+        "METHOD:REQUEST",
+        "PARTSTAT=NEEDS-ACTION",
+        "RSVP requested"
+      ],
+      "outlook_behavior": "Tentative if processed",
+      "gmail_behavior": "Often yes (auto-add from email)",
+      "test_purpose": "Baseline test - standard meeting invite with normal properties"
+    },
+    {
+      "id": "02",
+      "filename": "02-pre-accepted-spoof.ics",
+      "title": "Pre-Accepted Status Spoofing",
+      "risk_level": "High",
+      "key_risks": [
+        "PARTSTAT=ACCEPTED on incoming REQUEST",
+        "Spoofed ORGANIZER domain"
+      ],
+      "expected_flags": [
+        "auto-accept spoof detected",
+        "pre-accepted status on REQUEST",
+        "ORGANIZER domain mismatch"
+      ],
+      "parser_should_detect": [
+        "METHOD:REQUEST with PARTSTAT=ACCEPTED",
+        "RSVP=FALSE on incoming invite",
+        "Potential organizer spoofing"
+      ],
+      "outlook_behavior": "Likely tentative/auto",
+      "gmail_behavior": "Likely yes",
+      "test_purpose": "Test detection of pre-accepted invites that bypass user consent"
+    },
+    {
+      "id": "03",
+      "filename": "03-description-link.ics",
+      "title": "Embedded URL in Description",
+      "risk_level": "Medium",
+      "key_risks": [
+        "Benign external URL in DESCRIPTION"
+      ],
+      "expected_flags": [
+        "embedded link detected",
+        "scan for phishing patterns",
+        "URL in DESCRIPTION field"
+      ],
+      "parser_should_detect": [
+        "URLs in DESCRIPTION",
+        "External links requiring validation"
+      ],
+      "outlook_behavior": "Tentative",
+      "gmail_behavior": "Yes + link clickable",
+      "test_purpose": "Test URL detection and link scanning in event descriptions"
+    },
+    {
+      "id": "04",
+      "filename": "04-publish-autoadd.ics",
+      "title": "Published Event Auto-Add",
+      "risk_level": "Medium",
+      "key_risks": [
+        "METHOD:PUBLISH (no ATTENDEE)"
+      ],
+      "expected_flags": [
+        "PUBLISH method detected",
+        "subscription-style auto-add risk",
+        "no attendee interaction"
+      ],
+      "parser_should_detect": [
+        "METHOD:PUBLISH",
+        "Missing ATTENDEE field",
+        "Potential auto-subscription behavior"
+      ],
+      "outlook_behavior": "Possible auto-add",
+      "gmail_behavior": "Possible",
+      "test_purpose": "Test handling of PUBLISH method which can auto-add without user consent"
+    },
+    {
+      "id": "05",
+      "filename": "05-outlook-high-importance.ics",
+      "title": "High Priority/Importance Spoofing",
+      "risk_level": "High",
+      "key_risks": [
+        "X-MICROSOFT-CDO-IMPORTANCE:2",
+        "High-urgency summary text"
+      ],
+      "expected_flags": [
+        "urgency spoofing detected",
+        "high importance flag from untrusted sender",
+        "Microsoft-specific urgency markers"
+      ],
+      "parser_should_detect": [
+        "X-MICROSOFT-CDO-IMPORTANCE property",
+        "Urgency keywords in SUMMARY",
+        "Potential social engineering via urgency"
+      ],
+      "outlook_behavior": "Tentative",
+      "gmail_behavior": "Yes",
+      "test_purpose": "Test detection of urgency/importance manipulation via MS-specific properties"
+    },
+    {
+      "id": "06",
+      "filename": "06-outlook-has-attach.ics",
+      "title": "Fake Attachment Indicator",
+      "risk_level": "High",
+      "key_risks": [
+        "X-MS-Has-Attach:YES (no real attachment)"
+      ],
+      "expected_flags": [
+        "fake attachment UI spoofing",
+        "has-attach flag without actual attachment",
+        "misleading attachment indicator"
+      ],
+      "parser_should_detect": [
+        "X-MS-Has-Attach property",
+        "Attachment indicator mismatch",
+        "UI spoofing via attachment flag"
+      ],
+      "outlook_behavior": "Tentative",
+      "gmail_behavior": "Yes",
+      "test_purpose": "Test detection of fake attachment indicators that can mislead users"
+    },
+    {
+      "id": "07",
+      "filename": "07-outlook-suppress-reply.ics",
+      "title": "Suppressed Response with Pre-Accept",
+      "risk_level": "High",
+      "key_risks": [
+        "X-MICROSOFT-ISRESPONSEREQUESTED:FALSE",
+        "PARTSTAT=ACCEPTED"
+      ],
+      "expected_flags": [
+        "stealth auto-accept detected",
+        "response suppression + pre-accepted",
+        "silent calendar addition"
+      ],
+      "parser_should_detect": [
+        "X-MICROSOFT-ISRESPONSEREQUESTED:FALSE",
+        "Combined with PARTSTAT=ACCEPTED",
+        "Stealth acceptance pattern"
+      ],
+      "outlook_behavior": "Likely auto/tentative",
+      "gmail_behavior": "Yes",
+      "test_purpose": "Test detection of invites that suppress replies while pre-accepting"
+    },
+    {
+      "id": "08",
+      "filename": "08-google-conference-hint.ics",
+      "title": "Google Conference Extension",
+      "risk_level": "Medium",
+      "key_risks": [
+        "X-GOOGLE-CONFERENCE property",
+        "Benign URL in conference field"
+      ],
+      "expected_flags": [
+        "Google-specific extension detected",
+        "conference link spoofing potential",
+        "vendor-specific property"
+      ],
+      "parser_should_detect": [
+        "X-GOOGLE-CONFERENCE property",
+        "Conference URL validation needed",
+        "Google-specific extensions"
+      ],
+      "outlook_behavior": "Tentative",
+      "gmail_behavior": "Yes (Meet-like)",
+      "test_purpose": "Test handling of Google-specific conference properties"
+    },
+    {
+      "id": "09",
+      "filename": "09-combo-spoof-urgent.ics",
+      "title": "Combined Multiple Red Flags",
+      "risk_level": "Very High",
+      "key_risks": [
+        "Multiple X-MICROSOFT properties",
+        "PARTSTAT=ACCEPTED",
+        "Urgent summary",
+        "Spoofed ORGANIZER",
+        "Fake attachment flag",
+        "Response suppression"
+      ],
+      "expected_flags": [
+        "CRITICAL: multiple red flags detected",
+        "urgency + pre-accept + fake attach",
+        "response suppression",
+        "combined threat indicators"
+      ],
+      "parser_should_detect": [
+        "X-MS-Has-Attach",
+        "X-MICROSOFT-CDO-IMPORTANCE:2",
+        "X-MICROSOFT-ISRESPONSEREQUESTED:FALSE",
+        "X-MICROSOFT-CDO-BUSYSTATUS",
+        "PARTSTAT=ACCEPTED on REQUEST",
+        "Urgent language in SUMMARY"
+      ],
+      "outlook_behavior": "High chance",
+      "gmail_behavior": "High chance",
+      "test_purpose": "Test detection of sophisticated attacks combining multiple techniques"
+    },
+    {
+      "id": "10",
+      "filename": "10-busy-status-spoof.ics",
+      "title": "Busy/Free Status Manipulation",
+      "risk_level": "Medium",
+      "key_risks": [
+        "X-MICROSOFT-CDO-BUSYSTATUS",
+        "Spoofed busy/free status"
+      ],
+      "expected_flags": [
+        "status manipulation detected",
+        "free/busy spoofing",
+        "calendar availability manipulation"
+      ],
+      "parser_should_detect": [
+        "X-MICROSOFT-CDO-BUSYSTATUS property",
+        "Unusual busy status values (OOF)",
+        "Potential availability spoofing"
+      ],
+      "outlook_behavior": "Tentative",
+      "gmail_behavior": "Yes",
+      "test_purpose": "Test detection of busy/free status manipulation"
+    },
+    {
+      "id": "11",
+      "filename": "11-html-alt-desc.ics",
+      "title": "HTML Description with Links",
+      "risk_level": "High",
+      "key_risks": [
+        "X-ALT-DESC with HTML content",
+        "Embedded HTML link"
+      ],
+      "expected_flags": [
+        "unsafe HTML rendering risk",
+        "HTML in X-ALT-DESC",
+        "clickable HTML links in description"
+      ],
+      "parser_should_detect": [
+        "X-ALT-DESC property with HTML FMTTYPE",
+        "HTML anchor tags",
+        "Rich text rendering vulnerabilities"
+      ],
+      "outlook_behavior": "Depends on HTML rendering",
+      "gmail_behavior": "May strip HTML",
+      "test_purpose": "Test handling of HTML descriptions and potential XSS/phishing vectors"
+    },
+    {
+      "id": "12",
+      "filename": "12-recurring-daily.ics",
+      "title": "Recurring Event with Pre-Accept",
+      "risk_level": "Medium",
+      "key_risks": [
+        "RRULE recurring pattern",
+        "PARTSTAT=ACCEPTED on recurring event"
+      ],
+      "expected_flags": [
+        "recurrence persistence risk",
+        "recurring event auto-accepted",
+        "multiple calendar entries"
+      ],
+      "parser_should_detect": [
+        "RRULE property",
+        "Recurring pattern (FREQ=DAILY)",
+        "Pre-accepted recurring event",
+        "TZID usage"
+      ],
+      "outlook_behavior": "Multiple entries likely",
+      "gmail_behavior": "Series created",
+      "test_purpose": "Test handling of recurring events that can spam calendars"
+    },
+    {
+      "id": "13",
+      "filename": "13-valarm-reminder.ics",
+      "title": "Spoofed Urgent Reminder",
+      "risk_level": "Medium",
+      "key_risks": [
+        "VALARM with urgent message",
+        "Notification manipulation"
+      ],
+      "expected_flags": [
+        "spoofed reminder detected",
+        "urgent VALARM description",
+        "notification-based social engineering"
+      ],
+      "parser_should_detect": [
+        "VALARM component",
+        "TRIGGER timing",
+        "Urgent language in VALARM DESCRIPTION"
+      ],
+      "outlook_behavior": "Reminder will fire",
+      "gmail_behavior": "Notification may appear",
+      "test_purpose": "Test detection of malicious reminder/alarm manipulation"
+    },
+    {
+      "id": "14",
+      "filename": "14-location-url.ics",
+      "title": "URL in Location Field",
+      "risk_level": "Medium",
+      "key_risks": [
+        "LOCATION field with URL"
+      ],
+      "expected_flags": [
+        "clickable location URL",
+        "location field spoofing",
+        "URL in LOCATION requires validation"
+      ],
+      "parser_should_detect": [
+        "URL in LOCATION field",
+        "Clickable location in some clients",
+        "External link validation needed"
+      ],
+      "outlook_behavior": "Location may be clickable",
+      "gmail_behavior": "Location may be clickable",
+      "test_purpose": "Test detection of URLs embedded in location fields"
+    },
+    {
+      "id": "15",
+      "filename": "15-multiple-events.ics",
+      "title": "Multiple Events in One File",
+      "risk_level": "Medium",
+      "key_risks": [
+        "Multiple VEVENTs",
+        "Mixed PARTSTAT values",
+        "Batch processing"
+      ],
+      "expected_flags": [
+        "multiple events in single file",
+        "batch processing risk",
+        "one event pre-accepted"
+      ],
+      "parser_should_detect": [
+        "Multiple VEVENT components",
+        "Different UIDs",
+        "Mixed participation statuses",
+        "Batch import behavior"
+      ],
+      "outlook_behavior": "Multiple entries",
+      "gmail_behavior": "Multiple entries",
+      "test_purpose": "Test handling of multiple events which can overwhelm or confuse users"
+    },
+    {
+      "id": "16",
+      "filename": "16-cancel-preaccepted.ics",
+      "title": "Cancellation of Pre-Accepted Event",
+      "risk_level": "Medium",
+      "key_risks": [
+        "METHOD:CANCEL",
+        "PARTSTAT=ACCEPTED on cancellation"
+      ],
+      "expected_flags": [
+        "cancel method on accepted event",
+        "spoofed cancellation",
+        "potential calendar manipulation"
+      ],
+      "parser_should_detect": [
+        "METHOD:CANCEL",
+        "PARTSTAT=ACCEPTED",
+        "Cancellation from potentially spoofed organizer"
+      ],
+      "outlook_behavior": "May remove event",
+      "gmail_behavior": "May remove event",
+      "test_purpose": "Test handling of cancellations which can be used to remove legitimate events"
+    },
+    {
+      "id": "17",
+      "filename": "17-escaped-chars.ics",
+      "title": "Escaped Characters in Fields",
+      "risk_level": "Low-Medium",
+      "key_risks": [
+        "Escaped semicolons, commas, backslashes",
+        "Line breaks in text"
+      ],
+      "expected_flags": [
+        "proper escaping handling",
+        "unfolding verification",
+        "parser escape sequence handling"
+      ],
+      "parser_should_detect": [
+        "Escaped characters (\\;, \\,, \\\\)",
+        "Line breaks (\\n)",
+        "Proper text unfolding"
+      ],
+      "outlook_behavior": "Should parse correctly",
+      "gmail_behavior": "Should parse correctly",
+      "test_purpose": "Test proper handling of RFC 5545 escape sequences"
+    },
+    {
+      "id": "18",
+      "filename": "18-short-duration.ics",
+      "title": "Very Short Duration Event",
+      "risk_level": "Medium",
+      "key_risks": [
+        "1-minute event duration",
+        "Near-midnight timing",
+        "PARTSTAT=ACCEPTED"
+      ],
+      "expected_flags": [
+        "minimal visibility spam",
+        "very short duration",
+        "potential spam pattern"
+      ],
+      "parser_should_detect": [
+        "Event duration < 5 minutes",
+        "Unusual timing (23:59)",
+        "Pre-accepted short event"
+      ],
+      "outlook_behavior": "May be hard to notice",
+      "gmail_behavior": "May be hard to notice",
+      "test_purpose": "Test detection of short-duration events used to minimize visibility"
+    },
+    {
+      "id": "19",
+      "filename": "19-tzid-custom.ics",
+      "title": "Custom Time Zone Definition",
+      "risk_level": "Low-Medium",
+      "key_risks": [
+        "Custom VTIMEZONE",
+        "Non-standard TZID"
+      ],
+      "expected_flags": [
+        "custom timezone parsing",
+        "VTIMEZONE definition present",
+        "timezone validation needed"
+      ],
+      "parser_should_detect": [
+        "VTIMEZONE component",
+        "Custom TZID reference",
+        "Proper timezone offset handling"
+      ],
+      "outlook_behavior": "Should handle timezone",
+      "gmail_behavior": "Should handle timezone",
+      "test_purpose": "Test handling of custom time zones and VTIMEZONE components"
+    },
+    {
+      "id": "20",
+      "filename": "20-reply-spoof.ics",
+      "title": "Fake REPLY from Attacker",
+      "risk_level": "High",
+      "key_risks": [
+        "METHOD:REPLY",
+        "Spoofed acceptance from fake attendee"
+      ],
+      "expected_flags": [
+        "spoofed reply handling",
+        "fake PARTSTAT=ACCEPTED",
+        "reply from unexpected sender"
+      ],
+      "parser_should_detect": [
+        "METHOD:REPLY",
+        "ATTENDEE as sender (not ORGANIZER)",
+        "Potential fake acceptance injection"
+      ],
+      "outlook_behavior": "May show fake acceptance",
+      "gmail_behavior": "May show fake acceptance",
+      "test_purpose": "Test handling of spoofed REPLY messages that can fake attendee responses"
+    }
+  ],
+  "risk_level_definitions": {
+    "Low": "Standard patterns with minimal risk, primarily for baseline testing",
+    "Low-Medium": "Minor risks or edge cases requiring attention",
+    "Medium": "Moderate risk patterns that could be abused in specific contexts",
+    "High": "Significant risk patterns commonly used in calendar phishing",
+    "Very High": "Severe risk with multiple combined attack vectors"
+  },
+  "usage_instructions": {
+    "testing_methods": [
+      "Email ICS files as attachments to test accounts",
+      "Direct import into calendar applications",
+      "Feed through ICS parser programmatically",
+      "Test with different email client configurations"
+    ],
+    "recommended_parser_checks": [
+      "METHOD type validation",
+      "PARTSTAT verification on incoming requests",
+      "ORGANIZER domain vs. email sender comparison",
+      "URL detection in DESCRIPTION, LOCATION, and X-ALT-DESC",
+      "Vendor-specific property flagging (X-MICROSOFT-*, X-GOOGLE-*)",
+      "HTML content in X-ALT-DESC sanitization",
+      "Recurring pattern (RRULE) validation",
+      "VALARM content inspection",
+      "METHOD:CANCEL verification",
+      "METHOD:REPLY sender validation",
+      "Escape sequence handling",
+      "Event duration anomalies",
+      "Multiple VEVENT handling"
+    ]
+  }
+}

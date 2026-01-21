@@ -106,7 +106,7 @@ func TestWriteInviteHTMLIncludesEnhancedMetadata(t *testing.T) {
 		Journals:        []icsparse.JournalInfo{journal},
 	}
 
-	if err := WriteInviteHTML(cal, out, "light"); err != nil {
+	if err := WriteInviteHTML(cal, out, "light", true); err != nil {
 		t.Fatalf("WriteInviteHTML failed: %v", err)
 	}
 	data, err := os.ReadFile(out)

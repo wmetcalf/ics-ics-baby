@@ -1,0 +1,15 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//BenignTest//EN
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:ts03@parser-test.com
+DTSTAMP:20260120T173000Z
+DTSTART:20260212T160000Z
+DTEND:20260212T170000Z
+SUMMARY:Benign Test 03 - Link in Desc
+DESCRIPTION:Click here for details: https://example.com/safe-info
+ORGANIZER;CN="Team":mailto:team@other.com
+ATTENDEE;CN="You";PARTSTAT=NEEDS-ACTION:mailto:your@email.com
+END:VEVENT
+END:VCALENDAR

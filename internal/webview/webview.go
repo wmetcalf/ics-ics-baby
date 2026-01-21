@@ -438,6 +438,71 @@ func attendeeSummary(a icsparse.Attendee) string {
 	return name
 }
 
+func hasAutoprocessingSignals(signals *icsparse.AutoprocessingSignals) bool {
+	return signals != nil && (signals.OrganizerDetails != nil ||
+		len(signals.MicrosoftHeaders) > 0 ||
+		len(signals.GoogleHeaders) > 0 ||
+		signals.HasHighSequence ||
+		signals.HasSentByMismatch ||
+		len(signals.SuspiciousPatterns) > 0)
+}
+
+func isCriticalSignal(signals *icsparse.AutoprocessingSignals) bool {
+	return signals != nil && signals.HasHighSequence
+}
+
+func anyEventHasSignals(events []eventDisplay) bool {
+	for _, e := range events {
+		if hasAutoprocessingSignals(e.AutoprocessingSignals) {
+			return true
+		}
+	}
+	return false
+}
+
+func anyCriticalEventSignal(events []eventDisplay) bool {
+	for _, e := range events {
+		if isCriticalSignal(e.AutoprocessingSignals) {
+			return true
+		}
+	}
+	return false
+}
+
+func formatHeaderMap(headers map[string]string) []string {
+	if len(headers) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(headers))
+	for k := range headers {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	result := make([]string, 0, len(keys))
+	for _, k := range keys {
+		result = append(result, fmt.Sprintf("%s: %s", k, headers[k]))
+	}
+	return result
+}
+
+func organizerDetailsSummary(org *icsparse.OrganizerInfo) []string {
+	if org == nil {
+		return nil
+	}
+	lines := make([]string, 0, 4)
+	lines = append(lines, "Value: "+org.Value)
+	if org.CN != nil && *org.CN != "" {
+		lines = append(lines, "Common Name (CN): "+*org.CN)
+	}
+	if org.SentBy != nil && *org.SentBy != "" {
+		lines = append(lines, "Sent By: "+*org.SentBy)
+	}
+	if org.Directory != nil && *org.Directory != "" {
+		lines = append(lines, "Directory: "+*org.Directory)
+	}
+	return lines
+}
+
 var tmpl = template.Must(template.New("invite").Funcs(template.FuncMap{
 	"fmtTime": formatTimeValue,
 	"cleanText": func(s string) string {
@@ -468,6 +533,12 @@ var tmpl = template.Must(template.New("invite").Funcs(template.FuncMap{
 	"conferenceLabel":           conferenceLabel,
 	"attachmentLabel":           attachmentLabel,
 	"attachmentHref":            attachmentHref,
+	"hasAutoprocessingSignals":  hasAutoprocessingSignals,
+	"isCriticalSignal":          isCriticalSignal,
+	"anyEventHasSignals":        anyEventHasSignals,
+	"anyCriticalEventSignal":    anyCriticalEventSignal,
+	"formatHeaderMap":           formatHeaderMap,
+	"organizerDetailsSummary":   organizerDetailsSummary,
 }).Parse(`<!doctype html>
 <html lang="en">
 <head>
@@ -672,10 +743,141 @@ html,body {
   font-weight: 600;
   margin: 32px 0 16px;
 }
+.security-warning {
+  background: {{if eq .Style "dark"}}#4a2020{{else}}#fff3cd{{end}};
+  border: 2px solid {{if eq .Style "dark"}}#ff6b6b{{else}}#ffc107{{end}};
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 24px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.security-warning.critical {
+  background: {{if eq .Style "dark"}}#3d1f1f{{else}}#ffebee{{end}};
+  border-color: {{if eq .Style "dark"}}#ff4444{{else}}#d32f2f{{end}};
+}
+.security-warning-title {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  color: {{if eq .Style "dark"}}#ff6b6b{{else}}#d32f2f{{end}};
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.security-warning-title.critical {
+  color: {{if eq .Style "dark"}}#ff4444{{else}}#b71c1c{{end}};
+}
+.security-detail {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+.security-detail-label {
+  font-weight: 600;
+  color: var(--muted);
+}
+.security-pattern {
+  margin: 4px 0;
+  padding: 6px 12px;
+  background: {{if eq .Style "dark"}}#2a2a2a{{else}}#f5f5f5{{end}};
+  border-left: 3px solid {{if eq .Style "dark"}}#ff6b6b{{else}}#ffc107{{end}};
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+}
+.security-pattern.critical {
+  border-left-color: {{if eq .Style "dark"}}#ff4444{{else}}#d32f2f{{end}};
+}
+.security-header-item {
+  margin: 6px 0;
+  padding: 4px 8px;
+  background: {{if eq .Style "dark"}}#2a2a2a{{else}}#f8f9fa{{end}};
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: 'Courier New', monospace;
+}
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 8px;
+}
+.badge-warning {
+  background: {{if eq .Style "dark"}}#ff9800{{else}}#ffc107{{end}};
+  color: {{if eq .Style "dark"}}#000{{else}}#000{{end}};
+}
+.badge-critical {
+  background: {{if eq .Style "dark"}}#ff4444{{else}}#d32f2f{{end}};
+  color: #fff;
+}
 </style>
 </head>
 <body>
 <div class="wrap">
+  {{ if .ShowSecurityAlerts }}
+  {{ $hasCalSignals := hasAutoprocessingSignals .AutoprocessingSignals }}
+  {{ $hasEventSignals := anyEventHasSignals .Events }}
+  {{ if or $hasCalSignals $hasEventSignals }}
+  {{ $calCritical := isCriticalSignal .AutoprocessingSignals }}
+  {{ $eventCritical := anyCriticalEventSignal .Events }}
+  {{ $anyCritical := or $calCritical $eventCritical }}
+  <div class="security-warning{{ if $anyCritical }} critical{{ end }}">
+    <div class="security-warning-title{{ if $anyCritical }} critical{{ end }}">
+      ⚠️ Security Alerts
+      {{ if $anyCritical }}<span class="badge badge-critical">CRITICAL</span>{{ else }}<span class="badge badge-warning">WARNING</span>{{ end }}
+    </div>
+
+    {{ if $hasCalSignals }}
+    {{ $calSignals := .AutoprocessingSignals }}
+    <div class="security-detail">
+      <div class="security-detail-label">Calendar-Level Signals:</div>
+      {{ with $calSignals }}
+        {{ range .SuspiciousPatterns }}
+          <div class="security-pattern{{ if $calCritical }} critical{{ end }}">{{ . }}</div>
+        {{ end }}
+        {{ $msHeaders := formatHeaderMap .MicrosoftHeaders }}
+        {{ range $msHeaders }}
+          <div class="security-header-item">{{ . }}</div>
+        {{ end }}
+        {{ $googleHeaders := formatHeaderMap .GoogleHeaders }}
+        {{ range $googleHeaders }}
+          <div class="security-header-item">{{ . }}</div>
+        {{ end }}
+      {{ end }}
+    </div>
+    {{ end }}
+
+    {{ range .Events }}
+    {{ if hasAutoprocessingSignals .AutoprocessingSignals }}
+    {{ $signals := .AutoprocessingSignals }}
+    <div class="security-detail">
+      <div class="security-detail-label">Event: {{ .Summary }}</div>
+      {{ range $signals.SuspiciousPatterns }}
+        <div class="security-pattern{{ if isCriticalSignal $signals }} critical{{ end }}">{{ . }}</div>
+      {{ end }}
+      {{ if $signals.OrganizerDetails }}
+        {{ $details := organizerDetailsSummary $signals.OrganizerDetails }}
+        {{ range $details }}
+          <div class="security-header-item">{{ . }}</div>
+        {{ end }}
+      {{ end }}
+      {{ $msHeaders := formatHeaderMap $signals.MicrosoftHeaders }}
+      {{ range $msHeaders }}
+        <div class="security-header-item">{{ . }}</div>
+      {{ end }}
+      {{ $googleHeaders := formatHeaderMap $signals.GoogleHeaders }}
+      {{ range $googleHeaders }}
+        <div class="security-header-item">{{ . }}</div>
+      {{ end }}
+    </div>
+    {{ end }}
+    {{ end }}
+  </div>
+  {{ end }}
+  {{ end }}
+
   {{ if or .Description .URL .Calscale .TimezoneID .Timezones .CalCategories .CalContacts .CalImages .RefreshInterval .Source .CalendarColor }}
   <div class="calendar-info">
     {{ if .Description }}<div><strong>Description:</strong> {{ cleanText (str .Description) }}</div>{{ end }}
@@ -1593,27 +1795,29 @@ type journalDisplay struct {
 }
 
 type viewData struct {
-	Name            *string
-	ProdID          *string
-	Method          *string
-	Description     *string
-	URL             *string
-	Calscale        *string
-	TimezoneID      *string
-	Timezones       []icsparse.TimezoneInfo
-	Events          []eventDisplay
-	Todos           []todoDisplay
-	FreeBusy        []icsparse.FreeBusyInfo
-	Availabilities  []availabilityDisplay
-	Journals        []journalDisplay
-	Style           string
-	AccentColor     string
-	CalendarColor   string
-	CalCategories   []string
-	CalContacts     []string
-	CalImages       []icsparse.ImageInfo
-	RefreshInterval *string
-	Source          *string
+	Name                  *string
+	ProdID                *string
+	Method                *string
+	Description           *string
+	URL                   *string
+	Calscale              *string
+	TimezoneID            *string
+	Timezones             []icsparse.TimezoneInfo
+	Events                []eventDisplay
+	Todos                 []todoDisplay
+	FreeBusy              []icsparse.FreeBusyInfo
+	Availabilities        []availabilityDisplay
+	Journals              []journalDisplay
+	Style                 string
+	AccentColor           string
+	CalendarColor         string
+	CalCategories         []string
+	CalContacts           []string
+	CalImages             []icsparse.ImageInfo
+	RefreshInterval       *string
+	Source                *string
+	AutoprocessingSignals *icsparse.AutoprocessingSignals
+	ShowSecurityAlerts    bool
 }
 
 // convertSanitizedHTML safely converts pre-sanitized HTML strings to template.HTML
@@ -1627,7 +1831,7 @@ func convertSanitizedHTML(htmlPtr *string) template.HTML {
 	return template.HTML(*htmlPtr)
 }
 
-func WriteInviteHTML(cal *icsparse.CalendarInfo, outPath string, style string) error {
+func WriteInviteHTML(cal *icsparse.CalendarInfo, outPath string, style string, showSecurityAlerts bool) error {
 	accent := "#ff6600"
 	calColor := sanitizeColorPtr(cal.Color)
 	if calColor != "" {
@@ -1668,27 +1872,29 @@ func WriteInviteHTML(cal *icsparse.CalendarInfo, outPath string, style string) e
 	}
 
 	data := viewData{
-		Name:            cal.Name,
-		ProdID:          cal.ProdID,
-		Method:          cal.Method,
-		Description:     cal.Description,
-		URL:             cal.URL,
-		Calscale:        cal.Calscale,
-		TimezoneID:      cal.TimezoneID,
-		Timezones:       cal.Timezones,
-		Events:          events,
-		Todos:           todos,
-		FreeBusy:        cal.FreeBusy,
-		Availabilities:  availabilities,
-		Journals:        journals,
-		Style:           style,
-		AccentColor:     accent,
-		CalendarColor:   calColor,
-		CalCategories:   cal.Categories,
-		CalContacts:     cal.Contacts,
-		CalImages:       cal.Images,
-		RefreshInterval: cal.RefreshInterval,
-		Source:          cal.Source,
+		Name:                  cal.Name,
+		ProdID:                cal.ProdID,
+		Method:                cal.Method,
+		Description:           cal.Description,
+		URL:                   cal.URL,
+		Calscale:              cal.Calscale,
+		TimezoneID:            cal.TimezoneID,
+		Timezones:             cal.Timezones,
+		Events:                events,
+		Todos:                 todos,
+		FreeBusy:              cal.FreeBusy,
+		Availabilities:        availabilities,
+		Journals:              journals,
+		Style:                 style,
+		AccentColor:           accent,
+		CalendarColor:         calColor,
+		CalCategories:         cal.Categories,
+		CalContacts:           cal.Contacts,
+		CalImages:             cal.Images,
+		RefreshInterval:       cal.RefreshInterval,
+		Source:                cal.Source,
+		AutoprocessingSignals: cal.AutoprocessingSignals,
+		ShowSecurityAlerts:    showSecurityAlerts,
 	}
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {

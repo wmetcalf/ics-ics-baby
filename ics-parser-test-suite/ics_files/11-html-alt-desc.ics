@@ -1,0 +1,15 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//BenignTest//EN
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:ts11@parser-test.com
+DTSTAMP:20260120T180000Z
+DTSTART:20260301T150000Z
+DTEND:20260301T160000Z
+SUMMARY:Benign Test 11 - HTML Description
+X-ALT-DESC;FMTTYPE=text/html:<html><body><p>Click <a href="https://example.com/safe">here</a> for agenda. <b>Important!</b></p></body></html>
+ORGANIZER;CN="Support":mailto:support@external.com
+ATTENDEE;CN="You";PARTSTAT=NEEDS-ACTION:mailto:your@email.com
+END:VEVENT
+END:VCALENDAR

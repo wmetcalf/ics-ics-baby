@@ -86,6 +86,7 @@ func main() {
 	var wkhtmlTimeout time.Duration
 	var wkhtmlArgs multiFlag
 	var wkhtmlAllowPath multiFlag
+	var hideSecurityAlerts bool
 
 	flag.StringVar(&outDir, "out", "out", "Output directory")
 	flag.StringVar(&screenshot, "screenshot", "", "Output PNG path (default: OUT/preview.png)")
@@ -106,6 +107,7 @@ func main() {
 	flag.DurationVar(&wkhtmlTimeout, "wkhtml-timeout", 45*time.Second, "Timeout for wkhtmltoimage execution")
 	flag.Var(&wkhtmlArgs, "wkhtml-arg", "Additional argument passed straight to wkhtmltoimage (repeatable)")
 	flag.Var(&wkhtmlAllowPath, "wkhtml-allow-path", "Allow wkhtmltoimage to read this path when local file access is otherwise disabled (repeatable)")
+	flag.BoolVar(&hideSecurityAlerts, "hide-security-alerts", false, "Hide security alert warnings in HTML/PNG output (default: show alerts)")
 
 	flag.Parse()
 
@@ -130,6 +132,7 @@ func main() {
 		fmt.Println("  --view invite|agenda            PNG view mode (default: invite)")
 		fmt.Println("  --style light|dark              Render style (default: light)")
 		fmt.Println("  --width N                       PNG width in pixels (default: 1200)")
+		fmt.Println("  --hide-security-alerts          Hide security warnings in HTML/PNG (default: show)")
 		fmt.Println("\nFiltering options:")
 		fmt.Println("  --timezone ZONE                 Default timezone for naive dates (e.g., America/Chicago)")
 		fmt.Println("  --start YYYY-MM-DD              Filter start date (inclusive)")
@@ -240,7 +243,8 @@ func main() {
 	}
 	htmlOut = sanitizedHTMLOut
 
-	if err := webview.WriteInviteHTML(cal, htmlOut, style); err != nil {
+	showSecurityAlerts := !hideSecurityAlerts
+	if err := webview.WriteInviteHTML(cal, htmlOut, style, showSecurityAlerts); err != nil {
 		fmt.Fprintf(os.Stderr, "html render error: %v\n", err)
 	}
 
@@ -271,7 +275,7 @@ func main() {
 				os.Exit(1)
 			}
 		} else {
-			if err := render.RenderInvitePNG(cal, screenshot, width, style); err != nil {
+			if err := render.RenderInvitePNG(cal, screenshot, width, style, showSecurityAlerts); err != nil {
 				fmt.Fprintf(os.Stderr, "render error: %v\n", err)
 				os.Exit(1)
 			}

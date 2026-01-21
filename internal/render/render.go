@@ -24,13 +24,18 @@ import (
 )
 
 type palette struct {
-	Bg     color.Color
-	Panel  color.Color
-	Text   color.Color
-	Muted  color.Color
-	Edge   color.Color
-	Accent color.Color
-	ChipBg color.Color
+	Bg             color.Color
+	Panel          color.Color
+	Text           color.Color
+	Muted          color.Color
+	Edge           color.Color
+	Accent         color.Color
+	ChipBg         color.Color
+	WarningBg      color.Color
+	WarningBorder  color.Color
+	WarningText    color.Color
+	CriticalBg     color.Color
+	CriticalBorder color.Color
 }
 
 var (
@@ -132,23 +137,33 @@ func parseAccentColor(colorPtr *string, fallback color.Color) color.Color {
 func getPalette(style string) palette {
 	if style == "dark" {
 		return palette{
-			Bg:     color.RGBA{0x2b, 0x2b, 0x2b, 0xff}, // Dark gray background
-			Panel:  color.RGBA{0x3a, 0x3a, 0x3a, 0xff}, // Slightly lighter panel
-			Text:   color.RGBA{0xff, 0xff, 0xff, 0xff}, // White text
-			Muted:  color.RGBA{0xb0, 0xb0, 0xb0, 0xff}, // Light gray
-			Edge:   color.RGBA{0x55, 0x55, 0x55, 0xff}, // Border color
-			Accent: color.RGBA{0xff, 0x66, 0x00, 0xff}, // Orange accent
-			ChipBg: color.RGBA{0x45, 0x45, 0x45, 0xff}, // Chip background
+			Bg:             color.RGBA{0x2b, 0x2b, 0x2b, 0xff}, // Dark gray background
+			Panel:          color.RGBA{0x3a, 0x3a, 0x3a, 0xff}, // Slightly lighter panel
+			Text:           color.RGBA{0xff, 0xff, 0xff, 0xff}, // White text
+			Muted:          color.RGBA{0xb0, 0xb0, 0xb0, 0xff}, // Light gray
+			Edge:           color.RGBA{0x55, 0x55, 0x55, 0xff}, // Border color
+			Accent:         color.RGBA{0xff, 0x66, 0x00, 0xff}, // Orange accent
+			ChipBg:         color.RGBA{0x45, 0x45, 0x45, 0xff}, // Chip background
+			WarningBg:      color.RGBA{0x4a, 0x20, 0x20, 0xff}, // Dark warning background
+			WarningBorder:  color.RGBA{0xff, 0x6b, 0x6b, 0xff}, // Warning border
+			WarningText:    color.RGBA{0xff, 0x6b, 0x6b, 0xff}, // Warning text
+			CriticalBg:     color.RGBA{0x3d, 0x1f, 0x1f, 0xff}, // Dark critical background
+			CriticalBorder: color.RGBA{0xff, 0x44, 0x44, 0xff}, // Critical border
 		}
 	}
 	return palette{
-		Bg:     color.RGBA{0xf5, 0xf5, 0xf5, 0xff}, // Light gray background
-		Panel:  color.RGBA{0xff, 0xff, 0xff, 0xff}, // White panel
-		Text:   color.RGBA{0x1a, 0x1a, 0x1a, 0xff}, // Dark text
-		Muted:  color.RGBA{0x66, 0x66, 0x66, 0xff}, // Gray text
-		Edge:   color.RGBA{0xcc, 0xcc, 0xcc, 0xff}, // Border color
-		Accent: color.RGBA{0xff, 0x66, 0x00, 0xff}, // Orange accent
-		ChipBg: color.RGBA{0xe8, 0xe8, 0xe8, 0xff}, // Light chip background
+		Bg:             color.RGBA{0xf5, 0xf5, 0xf5, 0xff}, // Light gray background
+		Panel:          color.RGBA{0xff, 0xff, 0xff, 0xff}, // White panel
+		Text:           color.RGBA{0x1a, 0x1a, 0x1a, 0xff}, // Dark text
+		Muted:          color.RGBA{0x66, 0x66, 0x66, 0xff}, // Gray text
+		Edge:           color.RGBA{0xcc, 0xcc, 0xcc, 0xff}, // Border color
+		Accent:         color.RGBA{0xff, 0x66, 0x00, 0xff}, // Orange accent
+		ChipBg:         color.RGBA{0xe8, 0xe8, 0xe8, 0xff}, // Light chip background
+		WarningBg:      color.RGBA{0xff, 0xf3, 0xcd, 0xff}, // Light warning background
+		WarningBorder:  color.RGBA{0xff, 0xc1, 0x07, 0xff}, // Warning border (amber)
+		WarningText:    color.RGBA{0xd3, 0x2f, 0x2f, 0xff}, // Warning text (red)
+		CriticalBg:     color.RGBA{0xff, 0xeb, 0xee, 0xff}, // Light critical background
+		CriticalBorder: color.RGBA{0xd3, 0x2f, 0x2f, 0xff}, // Critical border (red)
 	}
 }
 
@@ -787,7 +802,182 @@ type inviteEventLayout struct {
 	labelWidth     float64
 }
 
-func RenderInvitePNG(cal *icsparse.CalendarInfo, outPath string, width int, style string) error {
+// hasAutoprocessingSignals checks if there are any signals to display
+func hasAutoprocessingSignals(signals *icsparse.AutoprocessingSignals) bool {
+	if signals == nil {
+		return false
+	}
+	return len(signals.SuspiciousPatterns) > 0 ||
+		len(signals.MicrosoftHeaders) > 0 ||
+		len(signals.GoogleHeaders) > 0 ||
+		signals.HasHighSequence ||
+		signals.HasSentByMismatch
+}
+
+// isCriticalSignal checks if the signals indicate a critical threat
+func isCriticalSignal(signals *icsparse.AutoprocessingSignals) bool {
+	return signals != nil && signals.HasHighSequence
+}
+
+// hasAnySecuritySignals checks if calendar or any events have signals
+func hasAnySecuritySignals(cal *icsparse.CalendarInfo) bool {
+	if hasAutoprocessingSignals(cal.AutoprocessingSignals) {
+		return true
+	}
+	for _, ev := range cal.Events {
+		if hasAutoprocessingSignals(ev.AutoprocessingSignals) {
+			return true
+		}
+	}
+	return false
+}
+
+// isAnyCritical checks if any signals are critical
+func isAnyCritical(cal *icsparse.CalendarInfo) bool {
+	if isCriticalSignal(cal.AutoprocessingSignals) {
+		return true
+	}
+	for _, ev := range cal.Events {
+		if isCriticalSignal(ev.AutoprocessingSignals) {
+			return true
+		}
+	}
+	return false
+}
+
+// calculateAllSecurityAlertsHeight estimates height for all alerts (calendar + events)
+func calculateAllSecurityAlertsHeight(cal *icsparse.CalendarInfo) float64 {
+	lineCount := 1 // Title line
+
+	// Calendar-level signals
+	if cal.AutoprocessingSignals != nil {
+		signals := cal.AutoprocessingSignals
+		if len(signals.SuspiciousPatterns) > 0 || len(signals.MicrosoftHeaders) > 0 || len(signals.GoogleHeaders) > 0 {
+			lineCount++ // "Calendar-Level Signals:" label
+			lineCount += len(signals.SuspiciousPatterns)
+			lineCount += len(signals.MicrosoftHeaders)
+			lineCount += len(signals.GoogleHeaders)
+		}
+	}
+
+	// Event-level signals
+	for _, ev := range cal.Events {
+		if hasAutoprocessingSignals(ev.AutoprocessingSignals) {
+			lineCount++ // "Event: <summary>" label
+			signals := ev.AutoprocessingSignals
+			lineCount += len(signals.SuspiciousPatterns)
+			lineCount += len(signals.MicrosoftHeaders)
+			lineCount += len(signals.GoogleHeaders)
+			if signals.OrganizerDetails != nil {
+				lineCount += 2 // organizer info typically 2 lines
+			}
+		}
+	}
+
+	return inviteLineHeight*float64(lineCount) + inviteDescPadding*3
+}
+
+// renderAllSecurityAlerts draws combined security warning box for all signals
+func renderAllSecurityAlerts(dc *gg.Context, cal *icsparse.CalendarInfo, x, y, contentWidth float64, pal palette, textFace font.Face) float64 {
+	if !hasAnySecuritySignals(cal) {
+		return y
+	}
+
+	critical := isAnyCritical(cal)
+	bgColor := pal.WarningBg
+	borderColor := pal.WarningBorder
+	titleColor := pal.WarningText
+	if critical {
+		bgColor = pal.CriticalBg
+		borderColor = pal.CriticalBorder
+		titleColor = pal.CriticalBorder
+	}
+
+	// Calculate box height
+	boxHeight := calculateAllSecurityAlertsHeight(cal)
+
+	// Draw background
+	dc.SetColor(bgColor)
+	dc.DrawRoundedRectangle(x, y, contentWidth, boxHeight, 8)
+	dc.Fill()
+
+	// Draw border
+	dc.SetColor(borderColor)
+	dc.SetLineWidth(2)
+	dc.DrawRoundedRectangle(x, y, contentWidth, boxHeight, 8)
+	dc.Stroke()
+
+	// Draw title
+	dc.SetFontFace(textFace)
+	dc.SetColor(titleColor)
+	title := "⚠️ Security Alerts"
+	if critical {
+		title += " [CRITICAL]"
+	} else {
+		title += " [WARNING]"
+	}
+	textY := y + inviteDescPadding + inviteLineHeight - inviteBaselineAdjust
+	dc.DrawString(title, x+inviteDescPadding, textY)
+	textY += inviteLineHeight
+
+	// Draw calendar-level signals
+	if hasAutoprocessingSignals(cal.AutoprocessingSignals) {
+		signals := cal.AutoprocessingSignals
+		dc.SetColor(pal.Muted)
+		dc.DrawString("Calendar-Level Signals:", x+inviteDescPadding, textY)
+		textY += inviteLineHeight
+
+		dc.SetColor(pal.Text)
+		for _, pattern := range signals.SuspiciousPatterns {
+			dc.DrawString("• "+pattern, x+inviteDescPadding+10, textY)
+			textY += inviteLineHeight
+		}
+		for k, v := range signals.MicrosoftHeaders {
+			dc.DrawString("  "+k+": "+v, x+inviteDescPadding+10, textY)
+			textY += inviteLineHeight
+		}
+		for k, v := range signals.GoogleHeaders {
+			dc.DrawString("  "+k+": "+v, x+inviteDescPadding+10, textY)
+			textY += inviteLineHeight
+		}
+	}
+
+	// Draw event-level signals
+	for _, ev := range cal.Events {
+		if hasAutoprocessingSignals(ev.AutoprocessingSignals) {
+			signals := ev.AutoprocessingSignals
+			dc.SetColor(pal.Muted)
+			eventLabel := "Event: " + ev.Summary
+			if len(eventLabel) > 60 {
+				eventLabel = eventLabel[:57] + "..."
+			}
+			dc.DrawString(eventLabel, x+inviteDescPadding, textY)
+			textY += inviteLineHeight
+
+			dc.SetColor(pal.Text)
+			for _, pattern := range signals.SuspiciousPatterns {
+				dc.DrawString("• "+pattern, x+inviteDescPadding+10, textY)
+				textY += inviteLineHeight
+			}
+			if signals.OrganizerDetails != nil {
+				dc.DrawString("  Organizer: "+signals.OrganizerDetails.Value, x+inviteDescPadding+10, textY)
+				textY += inviteLineHeight
+			}
+			for k, v := range signals.MicrosoftHeaders {
+				dc.DrawString("  "+k+": "+v, x+inviteDescPadding+10, textY)
+				textY += inviteLineHeight
+			}
+			for k, v := range signals.GoogleHeaders {
+				dc.DrawString("  "+k+": "+v, x+inviteDescPadding+10, textY)
+				textY += inviteLineHeight
+			}
+		}
+	}
+
+	return y + boxHeight
+}
+
+func RenderInvitePNG(cal *icsparse.CalendarInfo, outPath string, width int, style string, showSecurityAlerts bool) error {
 	pal := getPalette(style)
 	pal.Accent = parseAccentColor(cal.Color, pal.Accent)
 
@@ -800,6 +990,13 @@ func RenderInvitePNG(cal *icsparse.CalendarInfo, outPath string, width int, styl
 	journalLayouts := buildJournalLayouts(cal.Journals, width)
 	layouts = append(layouts, journalLayouts...)
 	totalHeight := calculateLayoutsHeight(layouts)
+
+	// Calculate security alert height (combined for calendar + all events)
+	securityAlertHeight := 0.0
+	if showSecurityAlerts && hasAnySecuritySignals(cal) {
+		securityAlertHeight = calculateAllSecurityAlertsHeight(cal)
+		totalHeight += securityAlertHeight + inviteHeaderMargin
+	}
 
 	// Add height for calendar metadata section if needed
 	metaLineCount := 0
@@ -830,6 +1027,12 @@ func RenderInvitePNG(cal *icsparse.CalendarInfo, outPath string, width int, styl
 	headerTextX := invitePad + inviteHeaderPadX + inviteIconSize + inviteIconGap
 
 	y := invitePad
+
+	// Render all security alerts first if present (combined calendar + events)
+	if showSecurityAlerts && hasAnySecuritySignals(cal) {
+		y = renderAllSecurityAlerts(dc, cal, invitePad, y, contentWidth, pal, textFace)
+		y += inviteHeaderMargin
+	}
 
 	// Display calendar metadata (scale and timezone) if available, matching HTML format
 	var calMeta []string

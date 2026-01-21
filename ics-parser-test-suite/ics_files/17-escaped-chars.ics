@@ -1,0 +1,15 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//BenignTest//EN
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:ts17@parser-test.com
+DTSTAMP:20260120T180000Z
+DTSTART:20260307T090000Z
+DTEND:20260307T100000Z
+SUMMARY:Test with \; escaped \; chars \, and \\ backslash
+DESCRIPTION:Description with line\nbreak and escaped\;text
+ORGANIZER;CN="Test":mailto:test@external.com
+ATTENDEE;CN="You";PARTSTAT=NEEDS-ACTION:mailto:your@email.com
+END:VEVENT
+END:VCALENDAR
