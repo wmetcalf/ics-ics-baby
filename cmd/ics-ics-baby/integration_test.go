@@ -27,16 +27,6 @@ func TestICSProcessingIntegration(t *testing.T) {
 		expectFiles []string
 	}{
 		{
-			name:    "Appointment1_wkhtml",
-			icsFile: "/home/coz/Appointment1.ics",
-			engine:  "wkhtml",
-			expectFiles: []string{
-				"ics-ics-baby-manifest.json",
-				"ics-ics-baby-preview.html",
-				"ics-ics-baby-preview.png",
-			},
-		},
-		{
 			name:    "Appointment1_go",
 			icsFile: "/home/coz/Appointment1.ics",
 			engine:  "go",
@@ -49,7 +39,7 @@ func TestICSProcessingIntegration(t *testing.T) {
 		{
 			name:    "TestSuite_PreAccepted",
 			icsFile: "../../ics-parser-test-suite/ics_files/02-pre-accepted-spoof.ics",
-			engine:  "wkhtml",
+			engine:  "go",
 			expectFiles: []string{
 				"ics-ics-baby-manifest.json",
 				"ics-ics-baby-preview.html",
@@ -59,7 +49,7 @@ func TestICSProcessingIntegration(t *testing.T) {
 		{
 			name:    "TestSuite_MultipleEvents",
 			icsFile: "../../ics-parser-test-suite/ics_files/15-multiple-events.ics",
-			engine:  "wkhtml",
+			engine:  "go",
 			expectFiles: []string{
 				"ics-ics-baby-manifest.json",
 				"ics-ics-baby-preview.html",
@@ -69,7 +59,7 @@ func TestICSProcessingIntegration(t *testing.T) {
 		{
 			name:    "TestSuite_HTMLDescription",
 			icsFile: "../../ics-parser-test-suite/ics_files/11-html-alt-desc.ics",
-			engine:  "wkhtml",
+			engine:  "go",
 			expectFiles: []string{
 				"ics-ics-baby-manifest.json",
 				"ics-ics-baby-preview.html",
@@ -128,9 +118,18 @@ func TestICSProcessingIntegration(t *testing.T) {
 	}
 }
 
-// TestRenderingEngines tests that both rendering engines work
+// TestRenderingEngines tests that rendering engines work
 func TestRenderingEngines(t *testing.T) {
-	engines := []string{"go", "wkhtml"}
+	// Test go engine by default; wkhtml requires external binary
+	engines := []string{"go"}
+
+	// Check if wkhtmltoimage is available and add it to tests
+	if _, err := exec.LookPath("wkhtmltoimage"); err == nil {
+		engines = append(engines, "wkhtml")
+	} else {
+		t.Log("wkhtmltoimage not found, skipping wkhtml engine tests")
+	}
+
 	testFile := "../../ics-parser-test-suite/ics_files/01-basic-needs-action.ics"
 
 	// Check if test file exists
@@ -216,7 +215,7 @@ func TestTestSuiteFiles(t *testing.T) {
 			binPath := "./ics-ics-baby-test"
 			cmd := exec.Command(
 				binPath,
-				"-screenshot-engine", "wkhtml",
+				"-screenshot-engine", "go",
 				"-out", tmpDir,
 				icsFile,
 			)

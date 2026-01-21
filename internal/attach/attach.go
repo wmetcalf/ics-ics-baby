@@ -137,14 +137,25 @@ func saveInline(raw string, attDir, base string, fmtType *string, maxBytes int64
 	tmpPath := tmpFile.Name()
 	tmpFile.Close()
 
+	// Try base64 with padding first, then without padding (RawStdEncoding), then raw string
 	n, md5sum, shaSum, err := writeWithLimit(base64.NewDecoder(base64.StdEncoding, strings.NewReader(raw)), tmpPath, maxBytes)
 	if err != nil {
 		os.Remove(tmpPath)
-		if isIllegalBase64(err) {
-			n, md5sum, shaSum, err = writeWithLimit(strings.NewReader(raw), tmpPath, maxBytes)
+		if isBase64DecodeError(err) {
+			// Try RawStdEncoding (base64 without padding) - common in real-world ICS files
+			n, md5sum, shaSum, err = writeWithLimit(base64.NewDecoder(base64.RawStdEncoding, strings.NewReader(raw)), tmpPath, maxBytes)
 			if err != nil {
 				os.Remove(tmpPath)
-				return "", 0, "", "", "", err
+				if isBase64DecodeError(err) {
+					// Fall back to treating as raw string
+					n, md5sum, shaSum, err = writeWithLimit(strings.NewReader(raw), tmpPath, maxBytes)
+					if err != nil {
+						os.Remove(tmpPath)
+						return "", 0, "", "", "", err
+					}
+				} else {
+					return "", 0, "", "", "", err
+				}
 			}
 		} else {
 			return "", 0, "", "", "", err
@@ -340,11 +351,12 @@ func fmtHex(sum []byte) string {
 	return string(out)
 }
 
-func isIllegalBase64(err error) bool {
+func isBase64DecodeError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return strings.Contains(err.Error(), "illegal base64 data")
+	errStr := err.Error()
+	return strings.Contains(errStr, "illegal base64 data") || strings.Contains(errStr, "unexpected EOF")
 }
 
 func intPtrFromInt64(v int64) *int {
