@@ -172,6 +172,30 @@ no VEVENT (VTODO/VJOURNAL/free-busy only)       → no view; sidecar status "ski
 printed to stderr as `[chromium] blocked: <url>` and do not fail the run; no new output file.
 For the OWA render they go in the sidecar's `blocked_requests`.
 
+### 2e. Perceptual image hashes via rosetta-squint *(added at Will's request)*
+
+`--image-hashes` writes `ics-ics-baby-hashes.json` with a rosetta-squint `phash` (hash_size 8)
+and `colorhash` (binbits 4) — the same pair Loadout's `image_hashes.py` computes, and
+byte-exact with Python `imagehash` 4.3.2, so values compare directly (Hamming) with Loadout,
+RedTusk and ClippyShot hashes. Hashed images:
+
+```text
+preview      ics-ics-baby-preview.png
+owa          ics-ics-baby-owa.png (when --invite-view)
+attachment   each extracted ATTACH whose detected MIME is an image
+inline       each data: image found in the raw X-ALT-DESC (brand-logo lookalikes)
+```
+
+Each entry: `{role, source, sha256, mime, phash, colorhash}` or `{role, source, sha256, error}`
+for undecodable or over-budget images (same caps as Loadout: 32 MiB, 25 MP).
+
+**Build constraint:** the Go port (`github.com/wmetcalf/rosetta-squint/squint/go/squint`) needs
+cgo + system `libturbojpeg` for byte-exact JPEG. To keep the release binary static, hashing is
+compiled only with the `squint` build tag; without it, `--image-hashes` exits with a clear
+"built without squint" error. `build.sh` gains a `squint` target; the blastbox engine image
+builds with the tag. Loadout still recomputes screenshot hashes at ingress (worker hashes are
+not trusted), so the worker-side value is standalone use plus the inline/attachment images.
+
 ### 3. Probe corpus (measurement, not runtime)
 
 `testdata/owa-probes/` — one small ICS per sanitizer rule (tag, attribute, CSS feature). Golden
