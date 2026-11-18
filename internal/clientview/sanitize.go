@@ -322,6 +322,7 @@ func OWASanitize(raw string, inlineDir string) (SanitizeResult, error) {
 	// counting every element, then with smaller budgets.
 	var nodes []*html.Node
 	var err error
+	tail := "" // input past a depthCut cut: not rendered, but evidence
 	budget := maxSanitizeDepth - depthHeadroom
 	attempts := []struct {
 		limit  int
@@ -333,6 +334,9 @@ func OWASanitize(raw string, inlineDir string) (SanitizeResult, error) {
 			in = raw[:cut]
 			s.drop("input_truncated")
 			s.drop("depth_limit")
+			tail = raw[cut:]
+		} else {
+			tail = ""
 		}
 		ctx := &html.Node{Type: html.ElementNode, Data: "div", DataAtom: atom.Div}
 		nodes, err = parseFragment(strings.NewReader(in), ctx)
@@ -354,6 +358,10 @@ func OWASanitize(raw string, inlineDir string) (SanitizeResult, error) {
 
 	s.walk(root)
 	s.hoistStyles(root)
+	if tail != "" {
+		// Links and references after the cut still reach the sidecar.
+		s.tokenEvidence(tail)
+	}
 
 	// Placeholders can grow the markup past the cap. Prune whole nodes in
 	// document order so the output is a well-formed prefix; never slice text.
@@ -810,6 +818,11 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 						break
 					}
 				}
+			}
+			if tag == "br" || tag == "p" {
+				// </br> becomes a <br> element; a </p> without an open p
+				// inserts an empty one: either way the text node ends.
+				merging = false
 			}
 			foster := tableCtx() && tableStructure[tag]
 			if tables > 0 && ignoredInBody[tag] && !foster {
@@ -1869,6 +1882,11 @@ func (s *sanitizer) declarations(body string) string {
 			continue
 		case prop == "position" && (strings.Contains(lval, "var(") || strings.Contains(lval, "env(") || strings.Contains(lval, "attr(")):
 			s.drop("css:position_indirect")
+			continue
+		case strings.Count(lval, "url(") != len(cssURL.FindAllStringIndex(val, -1)):
+			// An url( left open runs to the end of the declaration in CSS
+			// and still loads; the pattern only neutralizes closed ones.
+			s.drop("css:url_unclosed")
 			continue
 		case strings.Contains(lval, "image-set(") || strings.Contains(lval, "src("):
 			s.drop("css:image_set")

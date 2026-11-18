@@ -953,3 +953,30 @@ func TestTokenEvidenceCSS(t *testing.T) {
 		t.Fatalf("refs %+v", s.refs)
 	}
 }
+
+// Round-6: unclosed url( in style attributes, tail evidence after a cut,
+// </br> merging.
+func TestSanitizeRound6(t *testing.T) {
+	res, err := OWASanitize(`<div style="background-image:url(http://evil.test/painted.png">X</div><div style="cursor:url('http://evil.test/c.png'">Y</div>`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.HTML, "evil.test") || !contains(res.Dropped, "css:url_unclosed") {
+		t.Fatalf("%s / %v", res.HTML, res.Dropped)
+	}
+	res, _ = OWASanitize("<p>Agenda</p>"+strings.Repeat("<div>", 490)+strings.Repeat("</div>", 490)+
+		`<p><a href="https://login.evil.example/owa">Review</a><img src="https://track.evil.example/p.gif"></p>`, "")
+	if len(res.Links) != 1 || len(res.RemoteRefs) != 1 {
+		t.Fatalf("tail evidence lost: links %v refs %v dropped %v", res.Links, res.RemoteRefs, res.Dropped)
+	}
+	var b strings.Builder
+	b.WriteString("<p>Digest</p>")
+	for i := 0; i < 2000; i++ {
+		b.WriteString("Ticket " + strconv.Itoa(i) + " updated by the service desk team</br>")
+	}
+	b.WriteString(`<p><a href="https://help.example/desk">desk</a></p>`)
+	res, _ = OWASanitize(b.String(), "")
+	if contains(res.Dropped, "input_truncated") || !strings.Contains(res.HTML, "help.example") {
+		t.Fatalf("legit </br> digest truncated: %v", res.Dropped)
+	}
+}

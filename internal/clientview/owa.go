@@ -119,7 +119,9 @@ func JoinURL(ev *icsparse.EventInfo) (raw string, active bool) {
 
 // isWebURL: http(s) scheme, a host, and no whitespace/control characters.
 func isWebURL(raw string) bool {
-	if raw == "" || strings.IndexFunc(raw, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+	if raw == "" || strings.IndexFunc(raw, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r) || unicode.Is(unicode.Cf, r)
+	}) >= 0 {
 		return false
 	}
 	u, err := url.Parse(raw)
@@ -448,7 +450,41 @@ func eventEvidence(ev *icsparse.EventInfo, outDir string) (EventEvidence, error)
 	return d, nil
 }
 
+// bidiControls reorder neighbouring text: in a subject, location or
+// attendee they could reverse the view's own labels (a trailing U+202E in
+// LOCATION painted the host label "(moc.tfosorcim.ai)" as
+// "(ia.microsoft.com)"). They are shown as U+FFFD instead.
+var bidiControls = strings.NewReplacer(
+	"\u202a", "\ufffd", "\u202b", "\ufffd", "\u202c", "\ufffd", "\u202d", "\ufffd", "\u202e", "\ufffd",
+	"\u2066", "\ufffd", "\u2067", "\ufffd", "\u2068", "\ufffd", "\u2069", "\ufffd",
+	"\u200e", "\ufffd", "\u200f", "\ufffd", "\u061c", "\ufffd",
+)
+
+// neutralizeBidi cleans every attacker-supplied string of the view chrome.
+func neutralizeBidi(v *owaView) {
+	c := bidiControls.Replace
+	v.Reason, v.Subject, v.Initials = c(v.Reason), c(v.Subject), c(v.Initials)
+	v.OrganizerName, v.OrganizerAddr, v.When, v.Recurrence = c(v.OrganizerName), c(v.OrganizerAddr), c(v.When), c(v.Recurrence)
+	v.Location, v.LocationHost, v.JoinRaw, v.JoinHost = c(v.Location), c(v.LocationHost), c(v.JoinRaw), c(v.JoinHost)
+	v.BodyText = c(v.BodyText)
+	for i := range v.Required {
+		v.Required[i] = c(v.Required[i])
+	}
+	for i := range v.Optional {
+		v.Optional[i] = c(v.Optional[i])
+	}
+	for i := range v.Attachments {
+		v.Attachments[i].Name = c(v.Attachments[i].Name)
+	}
+	others := make([]string, len(v.OtherEvents)) // (shared with the sidecar)
+	for i, e := range v.OtherEvents {
+		others[i] = c(e)
+	}
+	v.OtherEvents = others
+}
+
 func writeView(outDir string, view owaView) error {
+	neutralizeBidi(&view)
 	if abandoned.Load() && !view.Failed {
 		// WriteOWABudgeted gave up on this build and wrote a failure page.
 		return fmt.Errorf("view build abandoned")

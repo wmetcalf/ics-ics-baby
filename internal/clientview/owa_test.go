@@ -402,3 +402,20 @@ func TestWriteOWABudgeted(t *testing.T) {
 		t.Fatalf("failure page: %v %s", rerr, b)
 	}
 }
+
+// Bidi controls in attacker text must not reorder the view's own labels
+// (a trailing U+202E in LOCATION painted "(moc.tfosorcim.ai)" as
+// "(ia.microsoft.com)").
+func TestOWABidiControlsNeutralized(t *testing.T) {
+	cal := parseICS(t, invite("REQUEST", "LOCATION:https://moc.tfosorcim.ai/‮",
+		"ATTENDEE;CN=Bob ‮:mailto:moc.tfosorcim@oec", "X-ALT-DESC;FMTTYPE=text/html:<p>x</p>"))
+	_, html, _ := writeOWA(t, cal)
+	for _, r := range []string{"‮", "‭", "⁦", "⁧", "⁨", "‏"} {
+		if strings.Contains(html[:strings.Index(html, `class="owa-body-wrap"`)], r) {
+			t.Fatalf("bidi control %U reached the chrome", []rune(r)[0])
+		}
+	}
+	if isWebURL("https://moc.tfosorcim.ai/‮") || isWebURL("https://a‮b.example/") {
+		t.Fatal("URL with a bidi control treated as a live link")
+	}
+}
