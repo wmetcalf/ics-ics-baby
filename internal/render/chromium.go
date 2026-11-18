@@ -30,6 +30,9 @@ type ChromiumSettings struct {
 	Timeout   time.Duration
 	NoSandbox bool
 	MaxHeight int
+	// Logf receives chromedp's own log and error lines, already prefixed with
+	// "[chromium] chromedp: ". Nil writes them to stderr.
+	Logf func(format string, args ...any)
 }
 
 const (
@@ -140,7 +143,7 @@ func RenderHTMLWithChromium(htmlPath, pngPath string, width int, opts ChromiumSe
 	defer tcancel()
 	actx, acancel := chromedp.NewExecAllocator(tctx, allocOpts...)
 	defer acancel()
-	ctx, cancel := chromedp.NewContext(actx)
+	ctx, cancel := chromedp.NewContext(actx, chromedp.WithBrowserOption(chromedpLogOptions(opts.Logf)...))
 	defer cancel()
 
 	var mu sync.Mutex
@@ -276,3 +279,18 @@ func dedupSorted(in []string) []string {
 
 // chromiumAfterLoadHook, when set by tests, fails a render after the page loaded.
 var chromiumAfterLoadHook func() error
+
+// chromedpLogOptions routes chromedp's log and error output (which otherwise
+// goes unprefixed through the standard logger) to logf with a "[chromium]"
+// prefix, and drops page console output (JavaScript is off anyway).
+func chromedpLogOptions(logf func(format string, args ...any)) []chromedp.BrowserOption {
+	if logf == nil {
+		logf = func(format string, args ...any) { fmt.Fprintf(os.Stderr, format+"\n", args...) }
+	}
+	prefixed := func(format string, args ...any) { logf("[chromium] chromedp: "+format, args...) }
+	return []chromedp.BrowserOption{
+		chromedp.WithBrowserLogf(prefixed),
+		chromedp.WithBrowserErrorf(func(format string, args ...any) { prefixed("error: "+format, args...) }),
+		chromedp.WithConsolef(func(string, ...any) {}),
+	}
+}
