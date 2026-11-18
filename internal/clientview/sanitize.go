@@ -1487,7 +1487,9 @@ func (s *sanitizer) href(n *html.Node, tag string, a *html.Attribute) bool {
 		label = clip(v, maxLabel)
 	}
 	if label != "" {
-		span := &html.Node{Type: html.ElementNode, Data: "span", DataAtom: atom.Span,
+		// <bdi>: a bidi isolate, so an unterminated override in the
+		// attacker's text around it cannot reorder the label.
+		span := &html.Node{Type: html.ElementNode, Data: "bdi", DataAtom: atom.Bdi,
 			Attr: []html.Attribute{{Key: "class", Val: "owa-host"}}}
 		span.AppendChild(&html.Node{Type: html.TextNode, Data: "(" + label + ")"})
 		if n.Parent != nil && !inForeign(n) {

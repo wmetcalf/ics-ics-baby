@@ -95,6 +95,9 @@ type EventInfo struct {
 	// AltDescHTMLParts are every non-empty FMTTYPE=text/html X-ALT-DESC, in
 	// order, unescaped and unsanitized (never serialized).
 	AltDescHTMLParts []string `json:"-"`
+	// AltDescHTMLPartsDropped counts earlier parts not kept (at most
+	// maxAltDescHTMLParts are).
+	AltDescHTMLPartsDropped int `json:"-"`
 	// OrganizerCN is the ORGANIZER's CN parameter (display name), if any.
 	OrganizerCN *string `json:"-"`
 	// Findings are the stable-coded forms of this event's alert strings.
@@ -837,6 +840,12 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 				raw := unescapeICSTextExact(value)
 				ft := strings.ToLower(strings.TrimSpace(params["FMTTYPE"]))
 				if strings.Contains(ft, "html") && strings.TrimSpace(raw) != "" {
+					if len(ev.AltDescHTMLParts) >= maxAltDescHTMLParts {
+						// Bounded memory: keep the latest parts (the view
+						// shows the last one) and count the rest.
+						ev.AltDescHTMLParts = append(ev.AltDescHTMLParts[:0], ev.AltDescHTMLParts[1:]...)
+						ev.AltDescHTMLPartsDropped++
+					}
 					ev.AltDescHTMLParts = append(ev.AltDescHTMLParts, raw)
 				}
 				if ev.AltDescRaw == nil || (strings.TrimSpace(*ev.AltDescRaw) == "" && strings.TrimSpace(raw) != "") {
@@ -1794,6 +1803,9 @@ func unescapeICSText(s string) string {
 // unescapeICSTextExact decodes RFC 5545 TEXT escapes in a single left-to-right
 // pass, so an escaped backslash followed by "n" stays a literal backslash + n.
 // (unescapeICSText is left as-is: changing it would alter default outputs.)
+// maxAltDescHTMLParts bounds the HTML X-ALT-DESC parts kept per event.
+const maxAltDescHTMLParts = 64
+
 func unescapeICSTextExact(s string) string {
 	if !strings.Contains(s, "\\") {
 		return s

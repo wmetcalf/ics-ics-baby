@@ -1075,3 +1075,15 @@ func TestDropCapKeepsFixedCodes(t *testing.T) {
 		t.Fatalf("dropped tail %v", res.Dropped[len(res.Dropped)-3:])
 	}
 }
+
+// The generated host label is a bidi isolate: an unterminated override in
+// the attacker's link text cannot reverse it.
+func TestHostLabelIsolated(t *testing.T) {
+	res, err := OWASanitize("<p><a href=\"https://moc.tfosorcim.ai/x\">login ‮</a> more</p>", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.HTML, `<bdi class="owa-host">(moc.tfosorcim.ai)</bdi>`) {
+		t.Fatalf("%s", res.HTML)
+	}
+}

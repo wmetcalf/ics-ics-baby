@@ -422,6 +422,11 @@ func renderOWAChromeOnly(cal *icsparse.CalendarInfo, inputSHA, outDir, htmlPath,
 	if err == nil && res.Truncated {
 		chromeSC.Dropped = append(chromeSC.Dropped, "capture_truncated")
 	}
+	if err == nil && budgetExceeded {
+		// The view HTML is only a failure page then: the chrome-only page
+		// (what the PNG shows) replaces it.
+		err = os.Rename(chromePath, htmlPath)
+	}
 	return chromeSC, err
 }
 

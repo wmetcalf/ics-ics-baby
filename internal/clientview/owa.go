@@ -443,7 +443,7 @@ func sanitizeParts(ev *icsparse.EventInfo, outDir string) (*SanitizeResult, erro
 	for _, d := range results[chosen].Dropped {
 		addDrop(d)
 	}
-	if start > 0 {
+	if start > 0 || ev.AltDescHTMLPartsDropped > 0 {
 		addDrop("alt_desc_parts_capped")
 	}
 	// Evidence in document order: earliest part first.
