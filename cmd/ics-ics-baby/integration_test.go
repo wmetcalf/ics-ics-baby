@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"image"
 	_ "image/png"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"ics-ics-baby/internal/render"
@@ -384,5 +387,138 @@ func TestCLIChromiumMissing(t *testing.T) {
 		if !fileExists(filepath.Join(out, f)) {
 			t.Fatalf("%s missing after chromium failure", f)
 		}
+	}
+}
+
+func readSidecar(t *testing.T, dir string) map[string]any {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, "ics-ics-baby-owa.json"))
+	if err != nil {
+		t.Fatalf("read sidecar: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("sidecar json: %v", err)
+	}
+	return m
+}
+
+func TestCLIInviteViewOK(t *testing.T) {
+	requireChromiumCLI(t)
+	out := filepath.Join(t.TempDir(), "o")
+	res := runCLI(t, "--out", out, "--invite-view", "owa", fixtureDir+"11-html-alt-desc.ics")
+	if res.exit != 0 {
+		t.Fatalf("exit %d: %s", res.exit, res.stderr)
+	}
+	for _, f := range []string{"ics-ics-baby-preview.png", "ics-ics-baby-owa.html", "ics-ics-baby-owa.json", "ics-ics-baby-owa.png"} {
+		if !fileExists(filepath.Join(out, f)) {
+			t.Fatalf("%s missing", f)
+		}
+	}
+	if _, err := loadPNG(filepath.Join(out, "ics-ics-baby-owa.png")); err != nil {
+		t.Fatalf("owa png: %v", err)
+	}
+	sc := readSidecar(t, out)
+	if sc["status"] != "ok" || sc["profile"] != "owa" || sc["emulation"] != true {
+		t.Fatalf("sidecar %v", sc)
+	}
+	for _, line := range []string{"Wrote OWA view:", "Wrote OWA sidecar:", "Wrote OWA PNG:"} {
+		if !strings.Contains(res.stdout, line) {
+			t.Fatalf("stdout lacks %q: %s", line, res.stdout)
+		}
+	}
+}
+
+func TestCLIInviteViewSkipped(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "o")
+	res := runCLI(t, "--out", out, "--invite-view", "owa", fixtureDir+"20-reply-spoof.ics")
+	if res.exit != 0 {
+		t.Fatalf("exit %d: %s", res.exit, res.stderr)
+	}
+	if sc := readSidecar(t, out); sc["status"] != "skipped" {
+		t.Fatalf("sidecar %v", sc)
+	}
+	if fileExists(filepath.Join(out, "ics-ics-baby-owa.png")) {
+		t.Fatal("OWA PNG written for skipped view")
+	}
+}
+
+func TestCLIInviteViewUnknown(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "o")
+	res := runCLI(t, "--out", out, "--invite-view", "gmail", fixtureDir+"11-html-alt-desc.ics")
+	if res.exit != 1 || !strings.Contains(res.stderr, "unknown invite view") {
+		t.Fatalf("exit %d stderr %q", res.exit, res.stderr)
+	}
+}
+
+func TestCLIInviteViewChromiumMissing(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "o")
+	res := runCLI(t, "--out", out, "--invite-view", "owa", "--chromium-bin", "/nonexistent", fixtureDir+"11-html-alt-desc.ics")
+	if res.exit != 1 {
+		t.Fatalf("exit = %d, want 1", res.exit)
+	}
+	for _, f := range []string{"ics-ics-baby-preview.png", "ics-ics-baby-owa.html", "ics-ics-baby-owa.json"} {
+		if !fileExists(filepath.Join(out, f)) {
+			t.Fatalf("%s missing", f)
+		}
+	}
+	if fileExists(filepath.Join(out, "ics-ics-baby-owa.png")) {
+		t.Fatal("OWA PNG exists despite failed render")
+	}
+	sc := readSidecar(t, out)
+	if sc["status"] != "render_failed" || sc["error"] == "" || sc["error"] == nil {
+		t.Fatalf("sidecar %v", sc)
+	}
+}
+
+func TestCLIInviteViewNoBeacon(t *testing.T) {
+	requireChromiumCLI(t)
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1) }))
+	defer srv.Close()
+	host := strings.TrimPrefix(srv.URL, "http://")
+	body := `<p>Hi</p><img src="` + srv.URL + `/pixel.gif" width=1 height=1>` +
+		`<div style="background:url(` + srv.URL + `/bg.png)">x</div>` +
+		`<style>p{background:url(` + srv.URL + `/css.png)}</style>` +
+		`<link rel=stylesheet href="` + srv.URL + `/s.css"><script>new Image().src="` + srv.URL + `/js"</script>`
+	esc := strings.NewReplacer(`\`, `\\`, ";", `\;`, ",", `\,`).Replace(body)
+	ics := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:beacon@test\r\n" +
+		"DTSTART:20260218T100000Z\r\nDTEND:20260218T110000Z\r\nSUMMARY:Beacon\r\n" +
+		"ORGANIZER;CN=X:mailto:x@example.test\r\nLOCATION:" + srv.URL + "/loc\r\n" +
+		"X-MICROSOFT-SKYPETEAMSMEETINGURL:" + srv.URL + "/join\r\n" +
+		"X-ALT-DESC;FMTTYPE=text/html:" + esc + "\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	dir := t.TempDir()
+	in := filepath.Join(dir, "beacon.ics")
+	if err := os.WriteFile(in, []byte(ics), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "o")
+	res := runCLI(t, "--out", out, "--screenshot-engine", "chromium", "--invite-view", "owa", in)
+	if res.exit != 0 {
+		t.Fatalf("exit %d: %s", res.exit, res.stderr)
+	}
+	if n := hits.Load(); n != 0 {
+		t.Fatalf("render contacted the beacon server %d times", n)
+	}
+	sc := readSidecar(t, out)
+	b, _ := json.Marshal(sc["remote_refs"])
+	if !strings.Contains(string(b), host) {
+		t.Fatalf("remote_refs do not name %s: %s", host, b)
+	}
+}
+
+func TestCLIInviteViewOrder(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "o")
+	res := runCLI(t, "--out", out, "--screenshot-engine", "chromium", "--chromium-bin", "/nonexistent", "--invite-view", "owa", fixtureDir+"11-html-alt-desc.ics")
+	if res.exit != 1 {
+		t.Fatalf("exit = %d, want 1", res.exit)
+	}
+	for _, f := range []string{"ics-ics-baby-manifest.json", "ics-ics-baby-preview.html", "ics-ics-baby-owa.html", "ics-ics-baby-owa.json"} {
+		if !fileExists(filepath.Join(out, f)) {
+			t.Fatalf("%s missing after preview render failure", f)
+		}
+	}
+	if strings.Contains(res.stdout, "Wrote PNG screenshot:") {
+		t.Fatal("claimed a preview PNG that failed to render")
 	}
 }

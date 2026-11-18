@@ -1,10 +1,13 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -12,6 +15,7 @@ import (
 	"time"
 
 	"ics-ics-baby/internal/attach"
+	"ics-ics-baby/internal/clientview"
 	"ics-ics-baby/internal/icsparse"
 	"ics-ics-baby/internal/render"
 	"ics-ics-baby/internal/webview"
@@ -91,6 +95,7 @@ func main() {
 	var chromiumTimeout time.Duration
 	var chromiumNoSandbox bool
 	var chromiumMaxHeight int
+	var inviteView string
 
 	flag.StringVar(&outDir, "out", "out", "Output directory")
 	flag.StringVar(&screenshot, "screenshot", "", "Output PNG path (default: OUT/preview.png)")
@@ -115,6 +120,7 @@ func main() {
 	flag.DurationVar(&chromiumTimeout, "chromium-timeout", 45*time.Second, "Timeout for each headless Chromium render")
 	flag.BoolVar(&chromiumNoSandbox, "chromium-no-sandbox", false, "Disable the Chromium sandbox (only for containers that cannot provide it)")
 	flag.IntVar(&chromiumMaxHeight, "chromium-max-height", 20000, "Maximum Chromium capture height in pixels")
+	flag.StringVar(&inviteView, "invite-view", "", "Also write an emulated client view of the invite: owa (rendered with headless Chromium)")
 	flag.BoolVar(&hideSecurityAlerts, "hide-security-alerts", false, "Hide security alert warnings in HTML/PNG output (default: show alerts)")
 
 	flag.Parse()
@@ -149,6 +155,8 @@ func main() {
 		fmt.Println("  --download-attachments          Download URL attachments (contacts remote hosts)")
 		fmt.Println("  --max-attachment-bytes N        Maximum size per attachment in bytes (default: 100 MiB)")
 		fmt.Println("  --max-ics-bytes N               Maximum ICS file size in bytes (default: 500 MiB)")
+		fmt.Println("\nClient view options:")
+		fmt.Println("  --invite-view owa               Also write an emulated Outlook-on-the-web view (HTML, sidecar JSON, PNG via Chromium)")
 		fmt.Println("\nScreenshot engine options:")
 		fmt.Println("  --screenshot-engine go|wkhtml|chromium  PNG renderer (default: go)")
 		fmt.Println("  --wkhtml-bin PATH               Path to wkhtmltoimage binary (default: wkhtmltoimage)")
@@ -182,6 +190,11 @@ func main() {
 		os.Exit(2)
 	}
 	icsPath := flag.Arg(0)
+
+	if inviteView != "" && inviteView != "owa" {
+		fmt.Fprintf(os.Stderr, "unknown invite view %q (supported: owa)\n", inviteView)
+		os.Exit(1)
+	}
 
 	// Sanitize input ICS path
 	sanitizedICSPath, err := sanitizeOutputPath(icsPath)
@@ -278,6 +291,7 @@ func main() {
 		MaxHeight: chromiumMaxHeight,
 	}
 
+	previewFailed := false
 	switch view {
 	case "invite":
 		if screenshotEngine == "chromium" {
@@ -287,7 +301,7 @@ func main() {
 			}
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "chromium render error: %v\n", err)
-				os.Exit(1)
+				previewFailed = true
 			}
 		} else if screenshotEngine == "wkhtml" {
 			opts := render.WKHTMLSettings{
@@ -300,22 +314,105 @@ func main() {
 			}
 			if err := render.RenderInvitePNGWithWKHTML(htmlOut, screenshot, width, opts); err != nil {
 				fmt.Fprintf(os.Stderr, "wkhtml render error: %v\n", err)
-				os.Exit(1)
+				previewFailed = true
 			}
 		} else {
 			if err := render.RenderInvitePNG(cal, screenshot, width, style, showSecurityAlerts); err != nil {
 				fmt.Fprintf(os.Stderr, "render error: %v\n", err)
-				os.Exit(1)
+				previewFailed = true
 			}
 		}
 	default:
 		if err := render.RenderAgendaPNG(cal, screenshot, width, style); err != nil {
 			fmt.Fprintf(os.Stderr, "render error: %v\n", err)
-			os.Exit(1)
+			previewFailed = true
 		}
+	}
+
+	if previewFailed && inviteView == "" {
+		// Unchanged behaviour without --invite-view: stop after the error.
+		os.Exit(1)
+	}
+
+	owaFailed := false
+	var owaWritten []string
+	if inviteView == "owa" {
+		owaFailed, owaWritten = writeOWAView(cal, icsPath, outDir, width, chromiumOpts)
 	}
 
 	fmt.Println("Wrote manifest:", manifestPath)
 	fmt.Println("Wrote HTML preview:", htmlOut)
-	fmt.Println("Wrote PNG screenshot:", screenshot)
+	if !previewFailed {
+		fmt.Println("Wrote PNG screenshot:", screenshot)
+	}
+	for _, line := range owaWritten {
+		fmt.Println(line)
+	}
+	if previewFailed || owaFailed {
+		os.Exit(1)
+	}
+}
+
+// writeOWAView writes the OWA HTML, renders its PNG with Chromium and then
+// writes the sidecar, which records the render outcome. It returns whether a
+// requested step failed and the "Wrote ..." lines for files that exist.
+func writeOWAView(cal *icsparse.CalendarInfo, icsPath, outDir string, width int, opts render.ChromiumSettings) (failed bool, wrote []string) {
+	htmlPath := filepath.Join(outDir, clientview.OWAHTMLName)
+	sidecarPath := filepath.Join(outDir, clientview.OWASidecarName)
+	pngPath := filepath.Join(outDir, clientview.OWAPNGName)
+
+	inputSHA, err := fileSHA256(icsPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "owa view: hash input: %v\n", err)
+	}
+	sc, err := clientview.WriteOWA(cal, inputSHA, outDir)
+	htmlOK := err == nil
+	if err != nil {
+		sc.Status = "render_failed"
+		sc.Error = err.Error()
+		failed = true
+		fmt.Fprintf(os.Stderr, "owa view error: %v\n", err)
+	} else {
+		wrote = append(wrote, "Wrote OWA view: "+htmlPath)
+	}
+
+	if htmlOK && sc.Status == "ok" {
+		blocked, err := render.RenderHTMLWithChromium(htmlPath, pngPath, width, opts)
+		if blocked != nil {
+			sc.BlockedRequests = blocked
+		}
+		if err != nil {
+			sc.Status = "render_failed"
+			sc.Error = err.Error()
+			failed = true
+			_ = os.Remove(pngPath)
+			fmt.Fprintf(os.Stderr, "owa chromium render error: %v\n", err)
+		}
+	}
+
+	if b, err := json.MarshalIndent(sc, "", "  "); err == nil {
+		if err := os.WriteFile(sidecarPath, append(b, '\n'), 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to write owa sidecar: %v\n", err)
+			failed = true
+		} else {
+			wrote = append(wrote, "Wrote OWA sidecar: "+sidecarPath)
+		}
+	}
+	if htmlOK && sc.Status == "ok" {
+		wrote = append(wrote, "Wrote OWA PNG: "+pngPath)
+	}
+	return failed, wrote
+}
+
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
