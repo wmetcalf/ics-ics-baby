@@ -210,7 +210,7 @@ Pins "behaves as today" before any code changes.
 - [ ] **Step 2: Run** the tests. Expected: FAIL.
 - [ ] **Step 3: Implement.**
   - The order is fixed: manifest → preview HTML → preview PNG → OWA HTML → OWA PNG → sidecar.
-  - Move the existing `os.Exit(1)` calls on preview-render errors into a `failed` flag set after printing the existing error text, so the later steps still run. The error text and the exit code stay the same as today for runs without the new flags.
+  - Move the existing `os.Exit(1)` calls on preview-render errors into a `failed` flag set after printing the existing error text, so the later steps still run. For runs without the new flags, stdout, stderr and the exit code stay exactly as today (no "Wrote" lines after a failed render).
   - The OWA PNG always uses Chromium. Its blocked URLs go into `Sidecar.BlockedRequests`, and a render error sets `render_failed` and `Error`.
   - `InputSHA256` is the sha256 of the input file.
   - Exit 1 if any requested render failed, otherwise 0. Print `Wrote OWA view:`, `Wrote OWA sidecar:` and `Wrote OWA PNG:` lines for the files that exist.
