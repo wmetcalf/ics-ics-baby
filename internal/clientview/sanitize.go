@@ -489,6 +489,11 @@ func (s *sanitizer) attrs(n *html.Node, tag string) {
 			a.Val = prefixTokens(a.Val)
 		case key == "id":
 			a.Val = "x_" + strings.TrimSpace(a.Val)
+		case key == "href" && (tag == "image" || tag == "img") && strings.HasPrefix(strings.ToLower(strings.TrimSpace(a.Val)), "data:"):
+			// image() already validated it: keep a self-contained SVG image.
+			if _, ok := s.inlineImage(a.Val); !ok {
+				continue
+			}
 		case key == "href":
 			if !s.href(n, tag, &a) {
 				continue

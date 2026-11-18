@@ -424,3 +424,17 @@ func TestNestedRuleInDeclarationsDropped(t *testing.T) {
 		t.Fatalf("plain declaration lost: %s", res.HTML)
 	}
 }
+
+// An SVG <image href="data:image/png..."> is kept like <img src="data:...">.
+func TestSVGImageDataHrefKept(t *testing.T) {
+	res, err := OWASanitize(`<svg><image href="data:image/png;base64,`+onePxPNG+`" width="10" height="10"></image></svg>`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.HTML, `href="data:image/png;base64,`) {
+		t.Fatalf("inline svg image lost its href: %s / %v", res.HTML, res.Dropped)
+	}
+	if len(res.RemoteRefs) != 1 || res.RemoteRefs[0].Kind != "inline_data" {
+		t.Fatalf("RemoteRefs = %+v", res.RemoteRefs)
+	}
+}
