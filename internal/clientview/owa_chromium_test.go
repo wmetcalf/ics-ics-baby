@@ -33,10 +33,32 @@ func TestOWABodyBadStringCannotEscapeScope(t *testing.T) {
 		"selector":    "p[title=\"x\n]{}.owa-head, .owa-pane{background:#ff0000!important}\np[title=\"]{color:blue}",
 		"declaration": "p{content:\"x\n}.owa-head, .owa-pane{background:#ff0000!important}\np{content:\"}",
 		"media":       "@media all and (min-width:\"1\n){}.owa-head, .owa-pane{background:#ff0000!important}\n@media \"){p{color:blue}}",
+		// Tokenizer differentials found by review: a quote inside a bad
+		// url(), comments re-formed by a single strip pass, a simple block
+		// that swallows '}', and <style> in foreign content.
+		"bad url":        "a url(x\"y) {}.owa-head, .owa-pane{background:#ff0000!important} p \"){color:blue}",
+		"comment rejoin": "a//**/*[*/**//, .owa-head, .owa-pane{background:#ff0000!important}",
+		"paren block":    "x{a:(}p)}div{background:#ff0000!important}",
+		"bracket block":  "x{a:[}p]}div{background:#ff0000!important}",
 	} {
 		t.Run(name, func(t *testing.T) {
 			assertHeaderClean(t, "<style>"+css+"</style><p>hello</p>")
 		})
+	}
+}
+
+// <style> under MathML text integration points or after an HTML
+// placeholder inside <svg> is serialized escaped but parsed as raw text.
+func TestOWAForeignStyleCannotEscapeScope(t *testing.T) {
+	if _, err := render.FindChromium(""); err != nil {
+		t.Skipf("headless Chromium not available: %v", err)
+	}
+	css := "a \"}{}.owa-head, .owa-pane{background:#ff0000!important}\"{color:blue}"
+	for name, body := range map[string]string{
+		"mtext":           "<math><mtext><style>" + css + "</style></mtext></math><p>hello</p>",
+		"svg placeholder": "<svg><image href=\"http://evil.test/x.png\"/><style>" + css + "</style></svg><p>hello</p>",
+	} {
+		t.Run(name, func(t *testing.T) { assertHeaderClean(t, body) })
 	}
 }
 

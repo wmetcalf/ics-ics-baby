@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -474,5 +475,76 @@ func TestSVGPresentationURLRecorded(t *testing.T) {
 	}
 	if len(res.RemoteRefs) != 1 || res.RemoteRefs[0].Host != "evil.test" {
 		t.Fatalf("RemoteRefs = %+v", res.RemoteRefs)
+	}
+}
+
+// background= on a void element must not make rendering fail.
+func TestBackgroundOnVoidElement(t *testing.T) {
+	for _, tag := range []string{"br", "hr", "wbr", "img"} {
+		res, err := OWASanitize(`<`+tag+` background="https://evil.test/bg.png">x`, "")
+		if err != nil {
+			t.Fatalf("%s: %v", tag, err)
+		}
+		if len(res.RemoteRefs) != 1 || res.RemoteRefs[0].Host != "evil.test" {
+			t.Fatalf("%s: refs %+v", tag, res.RemoteRefs)
+		}
+	}
+}
+
+// Formatting-element reconstruction can turn a small body into millions of
+// nodes; the tree size is bounded before parsing.
+func TestFormattingReconstructionBounded(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("<p>")
+	for i := 0; i < 450; i++ {
+		b.WriteString(`<b x=` + strconv.Itoa(i) + `>`)
+	}
+	b.WriteString("</p>")
+	b.WriteString(strings.Repeat("<p>x</p>", 20000))
+	start := time.Now()
+	res, err := OWASanitize(b.String(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("took %v", d)
+	}
+	if !contains(res.Dropped, "input_truncated") {
+		t.Fatalf("dropped = %v", res.Dropped)
+	}
+}
+
+// image-set() in an SVG presentation attribute loads images without url().
+func TestSVGPresentationImageSet(t *testing.T) {
+	res, err := OWASanitize(`<svg><rect mask="image-set('https://mask.evil.test/m.png' 1x)"></rect><rect cursor="-webkit-image-set(&quot;https://c.evil.test/c.png&quot; 1x), auto"></rect></svg>`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.HTML, "evil.test") {
+		t.Fatalf("image-set survived: %s", res.HTML)
+	}
+	if len(res.RemoteRefs) != 2 {
+		t.Fatalf("RemoteRefs = %+v", res.RemoteRefs)
+	}
+}
+
+// The inline image cap holds per output directory, across bodies.
+func TestInlineImageCapSharedAcrossBodies(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ics-ics-baby-inline")
+	n := 0
+	for body := 0; body < 3; body++ {
+		var b strings.Builder
+		for i := 0; i < maxInlineImages/2+10; i++ {
+			data := []byte("GIF89a" + strconv.Itoa(body) + "-" + strconv.Itoa(i))
+			b.WriteString(`<img src="data:image/gif;base64,` + base64.StdEncoding.EncodeToString(data) + `">`)
+		}
+		if _, err := OWASanitize(b.String(), dir); err != nil {
+			t.Fatal(err)
+		}
+		n++
+	}
+	ents, _ := os.ReadDir(dir)
+	if len(ents) > maxInlineImages {
+		t.Fatalf("%d bodies wrote %d inline files, cap %d", n, len(ents), maxInlineImages)
 	}
 }

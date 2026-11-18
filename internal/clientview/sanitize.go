@@ -55,9 +55,10 @@ const (
 	maxRecorded         = 1000    // remote refs / links recorded
 	maxLabel            = 120     // characters of a value shown in a placeholder
 	maxLinkText         = 200
-	maxCSSNesting       = 16   // nested @media/@supports kept
-	maxInlineImages     = 1000 // data: image files written per body
-	depthHeadroom       = 32   // parser stack used by html/context/implied elements
+	maxCSSNesting       = 16      // nested @media/@supports kept
+	maxRebuiltNodes     = 1000000 // formatting elements the parser may re-create
+	maxInlineImages     = 1000    // data: image files written per body
+	depthHeadroom       = 32      // parser stack used by html/context/implied elements
 	outputSlack         = 4096
 )
 
@@ -109,6 +110,12 @@ var optionalEndTags = map[string]bool{
 	"rb": true, "rt": true, "rp": true, "rtc": true, "colgroup": true,
 }
 
+// formattingElements are the HTML "active formatting elements".
+var formattingElements = map[string]bool{
+	"a": true, "b": true, "big": true, "code": true, "em": true, "font": true, "i": true,
+	"nobr": true, "s": true, "small": true, "strike": true, "strong": true, "tt": true, "u": true,
+}
+
 var voidElements = map[string]bool{
 	"area": true, "base": true, "br": true, "col": true, "embed": true, "hr": true,
 	"img": true, "input": true, "link": true, "meta": true, "source": true,
@@ -126,10 +133,12 @@ type sanitizer struct {
 	droppedSeen map[string]bool
 	capped      bool
 	inlineSeen  map[string]bool // inline image files written
+	inlineFiles int             // files in inlineDir, this body's included
+	styles      []*html.Node    // sanitized <style> elements, in order
 }
 
 func newSanitizer(inlineDir string) *sanitizer {
-	return &sanitizer{
+	s := &sanitizer{
 		inlineDir:   inlineDir,
 		generated:   map[*html.Node]bool{},
 		refSeen:     map[string]bool{},
@@ -137,6 +146,13 @@ func newSanitizer(inlineDir string) *sanitizer {
 		droppedSeen: map[string]bool{},
 		inlineSeen:  map[string]bool{},
 	}
+	if inlineDir != "" {
+		// The cap is per directory: every body of one view shares it.
+		if ents, err := os.ReadDir(inlineDir); err == nil {
+			s.inlineFiles = len(ents)
+		}
+	}
+	return s
 }
 
 func (s *sanitizer) drop(what string) {
@@ -217,6 +233,7 @@ func OWASanitize(raw string, inlineDir string) (SanitizeResult, error) {
 	}
 
 	s.walk(root)
+	s.hoistStyles(root)
 
 	// Placeholders can grow the markup past the cap. Prune whole nodes in
 	// document order so the output is a well-formed prefix; never slice text.
@@ -250,18 +267,32 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 	// only cuts sooner.
 	var stack []string
 	off := 0
+	// Each open formatting element can be re-created by the tree builder for
+	// every later text run or element (distinct attributes defeat the
+	// Noah's-Ark clause), so the tree can grow far past the input. Bound the
+	// worst case: sum, per token, the formatting elements still open.
+	formatting, rebuilt := 0, 0
 	for {
 		tt := z.Next()
 		if tt == html.ErrorToken {
 			return 0, false
 		}
 		n := len(z.Raw())
+		if tt == html.StartTagToken || tt == html.SelfClosingTagToken || tt == html.TextToken {
+			rebuilt += formatting
+			if rebuilt > maxRebuiltNodes {
+				return off, true
+			}
+		}
 		switch tt {
 		case html.StartTagToken, html.SelfClosingTagToken:
 			name, _ := z.TagName()
 			tag := string(name)
 			if !voidElements[tag] && (strict || !optionalEndTags[tag]) {
 				stack = append(stack, tag)
+				if formattingElements[tag] {
+					formatting++
+				}
 				if len(stack) > max {
 					return off, true
 				}
@@ -272,6 +303,11 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 			if !voidElements[tag] && (strict || !optionalEndTags[tag]) {
 				for i := len(stack) - 1; i >= 0; i-- {
 					if stack[i] == tag {
+						for _, t := range stack[i:] {
+							if formattingElements[t] {
+								formatting--
+							}
+						}
 						stack = stack[:i]
 						break
 					}
@@ -420,9 +456,39 @@ func (s *sanitizer) walk(root *html.Node) {
 		s.attrs(n, tag)
 		if tag == "style" {
 			s.styleElement(n)
+			s.styles = append(s.styles, n)
 			continue
 		}
 		pushChildren(n, f.depth+1)
+	}
+}
+
+// hoistStyles moves every <style> to the top of the fragment as a plain
+// HTML <style>. Style sheets apply page-wide wherever they sit, but inside
+// <svg>/<math> (or after a placeholder that makes Chromium leave foreign
+// content) the serializer escapes the text while Chromium reads it raw, so
+// the sanitizer's quotes would not be the browser's.
+func (s *sanitizer) hoistStyles(root *html.Node) {
+	var sheets []string
+	for _, n := range s.styles {
+		var css strings.Builder
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			if c.Type == html.TextNode {
+				css.WriteString(c.Data)
+			}
+		}
+		if n.Parent != nil {
+			n.Parent.RemoveChild(n)
+		}
+		if strings.TrimSpace(css.String()) != "" {
+			sheets = append(sheets, css.String())
+		}
+	}
+	anchor := root.FirstChild
+	for _, css := range sheets {
+		st := &html.Node{Type: html.ElementNode, Data: "style", DataAtom: atom.Style}
+		st.AppendChild(&html.Node{Type: html.TextNode, Data: css})
+		root.InsertBefore(st, anchor)
 	}
 }
 
@@ -537,6 +603,15 @@ func (s *sanitizer) attrs(n *html.Node, tag string) {
 				s.drop("attr:" + key + ":escaped")
 				continue
 			}
+			if lv := strings.ToLower(a.Val); strings.Contains(lv, "image-set(") || strings.Contains(lv, "src(") {
+				// image-set() takes plain string URLs, no url() needed.
+				for _, m := range cssQuoted.FindAllStringSubmatch(a.Val, -1) {
+					s.cssRef(firstNonEmpty(m[1], m[2]))
+				}
+				s.attrURLs(a.Val)
+				s.drop("attr:" + key + ":image_set")
+				continue
+			}
 			if s.attrURLs(a.Val) {
 				s.drop("attr:" + key + ":url")
 				continue
@@ -547,7 +622,13 @@ func (s *sanitizer) attrs(n *html.Node, tag string) {
 	n.Attr = kept
 	if bgPlaceholder != nil {
 		s.generated[bgPlaceholder] = true
-		n.InsertBefore(bgPlaceholder, n.FirstChild)
+		switch {
+		case !voidElements[tag]:
+			n.InsertBefore(bgPlaceholder, n.FirstChild)
+		case n.Parent != nil:
+			// A void element cannot hold children: label it from outside.
+			n.Parent.InsertBefore(bgPlaceholder, n.NextSibling)
+		}
 	}
 }
 
@@ -746,9 +827,14 @@ func (s *sanitizer) inlineImage(raw string) (RemoteRef, bool) {
 	r := RemoteRef{Kind: "inline_data", Value: "data:" + mime, SHA256: sha, Mime: mime}
 	if s.inlineDir != "" {
 		name := sha + "." + ext
-		if !s.inlineSeen[name] && len(s.inlineSeen) >= maxInlineImages {
-			s.drop("inline_images_capped")
-			return RemoteRef{}, false
+		if !s.inlineSeen[name] {
+			if _, err := os.Stat(filepath.Join(s.inlineDir, name)); err != nil {
+				if s.inlineFiles >= maxInlineImages {
+					s.drop("inline_images_capped")
+					return RemoteRef{}, false
+				}
+				s.inlineFiles++
+			}
 		}
 		s.inlineSeen[name] = true
 		if err := os.MkdirAll(s.inlineDir, 0o755); err == nil {
@@ -771,12 +857,13 @@ func (s *sanitizer) inlineImage(raw string) (RemoteRef, bool) {
 
 var (
 	cssComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
+	cssQuoted  = regexp.MustCompile(`"([^"]*)"|'([^']*)'`)
 	cssURL     = regexp.MustCompile(`(?i)url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*?))\s*\)`)
 )
 
 // stylesheet sanitizes a style sheet and scopes every selector to .owa-body.
 func (s *sanitizer) stylesheet(css string) string {
-	css = cssComment.ReplaceAllString(css, "")
+	css = stripCSSComments(css)
 	var out strings.Builder
 	s.ruleList(css, &out, 0)
 	if badCSSString(out.String()) {
@@ -784,7 +871,26 @@ func (s *sanitizer) stylesheet(css string) string {
 		s.drop("css:bad_string")
 		return ""
 	}
+	if out.Len() > 0 && !validScopedCSS(out.String()) {
+		// A real CSS parser would not read this sheet the way the scanner
+		// above did; drop it rather than risk unscoped rules.
+		s.drop("css:unsafe_structure")
+		return ""
+	}
 	return out.String()
+}
+
+// stripCSSComments removes comments until none are left: one pass can join
+// the halves around a removed comment into a new one ("//**/*" -> "/*").
+func stripCSSComments(css string) string {
+	for i := 0; i < 64 && strings.Contains(css, "/*"); i++ {
+		next := cssComment.ReplaceAllString(css, "")
+		if next == css {
+			break
+		}
+		css = next
+	}
+	return css
 }
 
 // badCSSString reports whether s has a quoted string that a CSS tokenizer
@@ -981,7 +1087,7 @@ func isIdentStart(c byte) bool {
 // declarations sanitizes a declaration block (style attribute or rule body).
 func (s *sanitizer) declarations(body string) string {
 	var kept []string
-	for _, d := range splitTop(cssComment.ReplaceAllString(body, ""), ';') {
+	for _, d := range splitTop(stripCSSComments(body), ';') {
 		d = strings.TrimSpace(d)
 		if d == "" {
 			continue

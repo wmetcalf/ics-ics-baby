@@ -320,3 +320,20 @@ func TestOWADeepBodyDoesNotFailView(t *testing.T) {
 		}
 	}
 }
+
+// Trusted chrome must not sit below the attacker-sized body, where a tall
+// body pushes it past the capture cut: attachments, other events and the
+// emulation label come before the body.
+func TestOWATrustedChromeAboveBody(t *testing.T) {
+	ics := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\n" +
+		"BEGIN:VEVENT\r\nUID:one@test\r\nDTSTART:20260218T100000Z\r\nSUMMARY:First\r\nATTACH:https://evil.test/Invoice.pdf.exe\r\n" +
+		`X-ALT-DESC;FMTTYPE=text/html:<p>x</p><div style="height:25000px"></div>` + "\r\nEND:VEVENT\r\n" +
+		"BEGIN:VEVENT\r\nUID:two@test\r\nSUMMARY:Second hidden event\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	_, html, _ := writeOWA(t, parseICS(t, ics))
+	body := strings.Index(html, `class="owa-body-wrap"`)
+	for _, want := range []string{`class="owa-attach"`, "Second hidden event", "Emulated client view — ics-ics-baby"} {
+		if i := strings.Index(html, want); i < 0 || i > body {
+			t.Errorf("%q at %d, body at %d", want, i, body)
+		}
+	}
+}
