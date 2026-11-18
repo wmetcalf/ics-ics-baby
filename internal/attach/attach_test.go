@@ -1,9 +1,12 @@
 package attach
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"ics-ics-baby/internal/icsparse"
@@ -59,5 +62,34 @@ func TestExtractAllLimited(t *testing.T) {
 	}
 	if n := savedFiles(t, out); n != 3 {
 		t.Fatalf("unlimited saved %d files, want 3", n)
+	}
+}
+
+// The cap bounds attempts, not just successes: failing downloads must not
+// let a hostile calendar make unlimited requests.
+func TestExtractAllLimitedCountsFailedDownloads(t *testing.T) {
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	var b strings.Builder
+	b.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:d@test\r\nSUMMARY:dl\r\n")
+	for i := 0; i < 10; i++ {
+		b.WriteString("ATTACH:" + srv.URL + "/f" + string(rune('0'+i)) + ".bin\r\n")
+	}
+	b.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
+	p := filepath.Join(t.TempDir(), "d.ics")
+	if err := os.WriteFile(p, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cal, err := icsparse.ParseICSFile(p, "", 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = ExtractAllLimited(cal, t.TempDir(), true, 1<<20, 2)
+	if n := hits.Load(); n != 2 {
+		t.Fatalf("server saw %d requests with --max-attachments 2", n)
 	}
 }

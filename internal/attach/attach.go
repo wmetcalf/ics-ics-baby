@@ -71,9 +71,11 @@ func ExtractAll(cal *icsparse.CalendarInfo, outDir string, download bool, maxByt
 	return ExtractAllLimited(cal, outDir, download, maxBytes, 0)
 }
 
-// ExtractAllLimited is ExtractAll with a cap on the number of attachment files
-// saved for the whole calendar (0 = unlimited). Attachments past the cap are
-// left unsaved and an error naming the limit is returned.
+// ExtractAllLimited is ExtractAll with a cap on the number of attachments
+// processed for the whole calendar (0 = unlimited). Every save or download
+// attempt counts, failed ones included, so the cap also bounds the requests
+// made with download enabled. Attachments past the cap are left unsaved and
+// an error naming the limit is returned.
 func ExtractAllLimited(cal *icsparse.CalendarInfo, outDir string, download bool, maxBytes int64, maxFiles int) error {
 	attDir := filepath.Join(outDir, "ics-ics-baby-attachments")
 	if err := os.MkdirAll(attDir, 0o755); err != nil {
@@ -90,7 +92,7 @@ func ExtractAllLimited(cal *icsparse.CalendarInfo, outDir string, download bool,
 		if maxFiles > 0 && saved >= maxFiles {
 			if !limitHit {
 				limitHit = true
-				err := fmt.Errorf("%w: %d files saved, remaining attachments not saved", errAttachmentLimit, maxFiles)
+				err := fmt.Errorf("%w: %d attachments processed, remaining attachments not saved", errAttachmentLimit, maxFiles)
 				noteAttachmentError("attachments", err)
 				firstErr = pickFirstError(firstErr, err)
 			}
@@ -111,13 +113,13 @@ func ExtractAllLimited(cal *icsparse.CalendarInfo, outDir string, download bool,
 				if atLimit() {
 					continue
 				}
+				saved++ // attempts count: failures cost work too
 				path, size, md5sum, sha, mt, err := saveInline(a.Value, attDir, base, a.Fmt, maxBytes)
 				if err != nil {
 					noteAttachmentError(base, err)
 					firstErr = pickFirstError(firstErr, err)
 					continue
 				}
-				saved++
 				rel, _ := filepath.Rel(outDir, path)
 				a.SavedAs = &rel
 				a.Size = intPtrFromInt64(size)
@@ -133,13 +135,13 @@ func ExtractAllLimited(cal *icsparse.CalendarInfo, outDir string, download bool,
 					if atLimit() {
 						continue
 					}
+					saved++ // a failed download is still a request made
 					path, size, md5sum, sha, mt, err := downloadURL(a.Value, attDir, base, a.Fmt, maxBytes)
 					if err != nil {
 						noteAttachmentError(a.Value, err)
 						firstErr = pickFirstError(firstErr, err)
 						continue
 					}
-					saved++
 					rel, _ := filepath.Rel(outDir, path)
 					a.SavedAs = &rel
 					a.Size = intPtrFromInt64(size)
