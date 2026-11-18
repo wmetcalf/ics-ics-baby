@@ -1790,6 +1790,9 @@ func unescapeICSTextExact(s string) string {
 	return b.String()
 }
 
+// UnescapeText decodes RFC 5545 TEXT escapes in a raw property value.
+func UnescapeText(s string) string { return unescapeICSTextExact(s) }
+
 var (
 	skipElements        = map[string]bool{"script": true, "style": true, "noscript": true}
 	blockBefore         = map[string]bool{"p": true, "div": true, "section": true, "article": true, "header": true, "footer": true, "table": true, "tr": true, "tbody": true, "thead": true, "h1": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true}

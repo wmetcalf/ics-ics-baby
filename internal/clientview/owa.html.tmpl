@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Subject}}</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #faf9f8; }
+  body { font-family: "Segoe UI", "Segoe UI Web", -apple-system, "Helvetica Neue", Arial, sans-serif; font-size: 14px; color: #242424; }
+  .owa-pane { max-width: 100%; margin: 0; background: #ffffff; border-left: 1px solid #e1dfdd; min-height: 100vh; }
+  .owa-head { padding: 20px 24px 12px 24px; border-bottom: 1px solid #edebe9; }
+  .owa-cancel-banner { margin: 0 0 12px 0; padding: 8px 12px; background: #fde7e9; color: #a4262c; border-left: 4px solid #a4262c; font-weight: 600; }
+  .owa-subject { font-size: 20px; font-weight: 600; line-height: 28px; margin: 0 0 12px 0; word-break: break-word; }
+  .owa-from { display: flex; align-items: center; gap: 12px; }
+  .owa-avatar { width: 40px; height: 40px; border-radius: 50%; background: #8764b8; color: #fff; font-weight: 600; display: flex; align-items: center; justify-content: center; font-size: 15px; flex: none; }
+  .owa-from-name { font-weight: 600; }
+  .owa-from-addr { color: #616161; }
+  .owa-meta { padding: 12px 24px; display: grid; grid-template-columns: 24px 1fr; row-gap: 8px; column-gap: 8px; border-bottom: 1px solid #edebe9; }
+  .owa-ico { color: #616161; text-align: center; }
+  .owa-meta-text { word-break: break-word; }
+  .owa-muted { color: #616161; }
+  .owa-loc-link, .owa-body a { color: #0f6cbd; text-decoration: none; }
+  .owa-host { color: #616161; font-size: 12px; margin-left: 4px; }
+  .owa-rsvp { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 24px; border-bottom: 1px solid #edebe9; }
+  .owa-rsvp span { display: inline-block; padding: 5px 12px; border: 1px solid #d1d1d1; border-radius: 4px; background: #fff; font-weight: 600; color: #242424; }
+  .owa-join-row { padding: 12px 24px; border-bottom: 1px solid #edebe9; }
+  .owa-join { display: inline-block; padding: 6px 16px; border-radius: 4px; background: #5b5fc7; color: #fff; font-weight: 600; text-decoration: none; }
+  .owa-join-inert { background: #c8c6c4; color: #323130; }
+  .owa-join-host { margin-top: 6px; color: #616161; font-size: 12px; word-break: break-all; }
+  .owa-join-raw { margin-top: 6px; font-family: Consolas, "Courier New", monospace; font-size: 12px; color: #a4262c; word-break: break-all; }
+  .owa-people { padding: 12px 24px; border-bottom: 1px solid #edebe9; }
+  .owa-people h3, .owa-attach h3 { font-size: 12px; font-weight: 600; color: #616161; margin: 0 0 6px 0; text-transform: uppercase; letter-spacing: .02em; }
+  .owa-people ul, .owa-attach ul, .owa-other ul { margin: 0 0 8px 0; padding-left: 18px; }
+  .owa-body-wrap { padding: 16px 24px; border-bottom: 1px solid #edebe9; }
+  .owa-body { position: relative; overflow: hidden; word-break: break-word; }
+  .owa-plain { white-space: pre-wrap; font-family: inherit; margin: 0; }
+  .owa-attach, .owa-other { padding: 12px 24px; border-bottom: 1px solid #edebe9; }
+  .owa-attach li span { color: #616161; }
+  .owa-footer { padding: 10px 24px 16px 24px; font-size: 11px; color: #8a8886; }
+  .owa-footer code { font-size: 11px; word-break: break-all; }
+</style>
+</head>
+<body>
+<div class="owa-pane">
+{{- if .Skipped}}
+  <div class="owa-head"><div class="owa-subject">No meeting view</div><div class="owa-muted">{{.Reason}}</div></div>
+{{- else}}
+  <div class="owa-head">
+    {{- if .Canceled}}<div class="owa-cancel-banner">This event has been canceled.</div>{{end}}
+    <div class="owa-subject">{{.Subject}}</div>
+    <div class="owa-from">
+      <div class="owa-avatar">{{.Initials}}</div>
+      <div><div class="owa-from-name">{{.OrganizerName}}</div>{{if .OrganizerAddr}}<div class="owa-from-addr">{{.OrganizerAddr}}</div>{{end}}</div>
+    </div>
+  </div>
+  <div class="owa-meta">
+    <div class="owa-ico">&#128339;</div>
+    <div class="owa-meta-text">{{if .When}}{{.When}}{{else}}<span class="owa-muted">No time given</span>{{end}}{{if .Recurrence}}<div class="owa-muted">{{.Recurrence}}</div>{{end}}</div>
+    {{- if .Location}}
+    <div class="owa-ico">&#128205;</div>
+    <div class="owa-meta-text">{{if .LocationLink}}<a class="owa-loc-link" href="{{.LocationLink}}">{{.Location}}</a><span class="owa-host">({{.LocationHost}})</span>{{else}}{{.Location}}{{end}}</div>
+    {{- end}}
+  </div>
+  {{- if not .Canceled}}
+  <div class="owa-rsvp"><span>Accept</span><span>Tentative</span><span>Decline</span><span>Propose new time</span></div>
+  {{- end}}
+  {{- if .JoinRaw}}
+  <div class="owa-join-row">
+    {{- if .JoinActive}}
+    <a class="owa-join" href="{{.JoinHref}}">Join</a>
+    <div class="owa-join-host">{{.JoinHost}}</div>
+    {{- else}}
+    <span class="owa-join owa-join-inert">Join</span>
+    <div class="owa-join-raw">{{.JoinRaw}}</div>
+    {{- end}}
+  </div>
+  {{- end}}
+  {{- if or .Required .Optional}}
+  <div class="owa-people">
+    {{- if .Required}}<h3>Required</h3><ul>{{range .Required}}<li>{{.}}</li>{{end}}</ul>{{end}}
+    {{- if .Optional}}<h3>Optional</h3><ul>{{range .Optional}}<li>{{.}}</li>{{end}}</ul>{{end}}
+  </div>
+  {{- end}}
+  <div class="owa-body-wrap"><div class="owa-body">{{if .BodyIsHTML}}{{.BodyHTML}}{{else}}<pre class="owa-plain">{{.BodyText}}</pre>{{end}}</div></div>
+  {{- if .Attachments}}
+  <div class="owa-attach"><h3>Attachments</h3><ul>{{range .Attachments}}<li>{{.Name}}{{if .Size}} <span>({{.Size}})</span>{{end}}</li>{{end}}</ul></div>
+  {{- end}}
+  {{- if .OtherEvents}}
+  <div class="owa-other"><h3>Other events in this file</h3><ul>{{range .OtherEvents}}<li>{{.}}</li>{{end}}</ul></div>
+  {{- end}}
+{{- end}}
+  <div class="owa-footer">Emulated Outlook-on-the-web rendering — ics-ics-baby · input sha256 <code>{{.InputSHA256}}</code></div>
+</div>
+</body>
+</html>
