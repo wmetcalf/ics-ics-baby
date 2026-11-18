@@ -1,11 +1,13 @@
 package clientview
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -335,5 +337,20 @@ func TestOWATrustedChromeAboveBody(t *testing.T) {
 		if i := strings.Index(html, want); i < 0 || i > body {
 			t.Errorf("%q at %d, body at %d", want, i, body)
 		}
+	}
+}
+
+// The rendered body's inline images come first in the shared budget.
+func TestOWARenderedBodyInlineFirst(t *testing.T) {
+	var hidden strings.Builder
+	for i := 0; i < maxInlineImages; i++ {
+		hidden.WriteString(`<img src="data:image/gif\;base64\,` + base64.StdEncoding.EncodeToString([]byte("GIF89a"+strconv.Itoa(i))) + `">`)
+	}
+	ics := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\n" +
+		"BEGIN:VEVENT\r\nUID:one@test\r\nSUMMARY:Shown\r\nX-ALT-DESC;FMTTYPE=text/html:<img src=\"data:image/png\\;base64\\," + onePxPNG + "\">\r\nEND:VEVENT\r\n" +
+		"BEGIN:VEVENT\r\nUID:two@test\r\nSUMMARY:Hidden\r\nX-ALT-DESC;FMTTYPE=text/html:" + hidden.String() + "\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	sc, html, _ := writeOWA(t, parseICS(t, ics))
+	if strings.Contains(html, "inline image dropped") || len(sc.RemoteRefs) != 1 || sc.RemoteRefs[0].Kind != "inline_data" {
+		t.Fatalf("rendered inline image lost: refs %+v dropped %v", sc.RemoteRefs, sc.Dropped)
 	}
 }

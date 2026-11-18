@@ -375,12 +375,10 @@ func TestSrcsetDataNotRemote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, r := range res.RemoteRefs {
-		if strings.HasPrefix(strings.ToLower(r.Value), "data:") && r.Kind != "inline_data" {
-			t.Fatalf("data: srcset candidate recorded as %q: %+v", r.Kind, res.RemoteRefs)
-		}
-	}
-	if len(res.RemoteRefs) != 1 || res.RemoteRefs[0].Host != "evil.test" {
+	// The data: candidate is extracted like a src= data image (with its
+	// hash); the remote one is a remote ref.
+	if len(res.RemoteRefs) != 2 || res.RemoteRefs[0].Kind != "inline_data" || res.RemoteRefs[0].SHA256 == "" ||
+		res.RemoteRefs[1].Kind != "remote" || res.RemoteRefs[1].Host != "evil.test" {
 		t.Fatalf("RemoteRefs = %+v", res.RemoteRefs)
 	}
 }
@@ -582,4 +580,87 @@ func TestFormattingReconstructionAfterEnclosingClose(t *testing.T) {
 	if !contains(res.Dropped, "input_truncated") {
 		t.Fatalf("dropped = %v", res.Dropped)
 	}
+}
+
+// Round-3 review cases.
+func TestSanitizeRound3(t *testing.T) {
+	san := func(t *testing.T, in string) SanitizeResult {
+		t.Helper()
+		res, err := OWASanitize(in, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	t.Run("use dropped", func(t *testing.T) {
+		res := san(t, `<svg><g id="a"><rect/></g><use href="#x_a"></use></svg>`)
+		if strings.Contains(res.HTML, "<use") {
+			t.Fatalf("use kept: %s", res.HTML)
+		}
+	})
+	t.Run("formatting ends inside marquee", func(t *testing.T) {
+		var b strings.Builder
+		for i := 0; i < 400; i++ {
+			b.WriteString(`<b x=` + strconv.Itoa(i) + `>`)
+		}
+		b.WriteString("<marquee>" + strings.Repeat("</b>", 400) + "</marquee>")
+		b.WriteString(strings.Repeat("<p>x</p>", 20000))
+		start := time.Now()
+		res := san(t, b.String())
+		if d := time.Since(start); d > time.Second {
+			t.Fatalf("took %v", d)
+		}
+		if !contains(res.Dropped, "input_truncated") {
+			t.Fatalf("dropped = %v", res.Dropped)
+		}
+	})
+	t.Run("re-created formatting depth", func(t *testing.T) {
+		var b strings.Builder
+		for i := 0; i < 600; i++ {
+			b.WriteString(`<div><b id=` + strconv.Itoa(i) + `></div>`)
+		}
+		res := san(t, b.String()+"x")
+		if strings.Contains(res.HTML, "could not be rendered") && !contains(res.Dropped, "depth_limit") {
+			t.Fatalf("dropped = %v", res.Dropped)
+		}
+	})
+	t.Run("svg title raw text never fails", func(t *testing.T) {
+		san(t, "<svg><title>"+strings.Repeat("<div>", 600)+"x")
+	})
+	t.Run("CDO CDC around sheet", func(t *testing.T) {
+		res := san(t, "<style><!--\np.MsoNormal{margin:0in;font-family:\"Calibri\",sans-serif}\n--></style><p class=MsoNormal>x</p>")
+		if !strings.Contains(res.HTML, ".owa-body p.x_MsoNormal{") {
+			t.Fatalf("Outlook sheet dropped: %s / %v", res.HTML, res.Dropped)
+		}
+	})
+	t.Run("srcset-only data image kept", func(t *testing.T) {
+		res := san(t, `<img srcset="data:image/png;base64,`+onePxPNG+` 1x" width="200" height="200">`)
+		if !strings.Contains(res.HTML, `src="data:image/png;base64,`) || len(res.RemoteRefs) != 1 || res.RemoteRefs[0].SHA256 == "" {
+			t.Fatalf("%s / %+v", res.HTML, res.RemoteRefs)
+		}
+	})
+	t.Run("svg leaves do not truncate", func(t *testing.T) {
+		res := san(t, `<svg>`+strings.Repeat(`<rect width="1" height="1"/>`, 600)+`</svg><p>PAY https://evil.example/</p>`)
+		if !strings.Contains(res.HTML, "PAY") {
+			t.Fatalf("tail lost: %v", res.Dropped)
+		}
+	})
+	t.Run("style media kept", func(t *testing.T) {
+		res := san(t, `<style media="print">p{display:none}</style><p>visible</p>`)
+		if !strings.Contains(res.HTML, `<style media="print">`) {
+			t.Fatalf("%s", res.HTML)
+		}
+	})
+	t.Run("html title with url( untouched", func(t *testing.T) {
+		res := san(t, `<p title="Pay via url(https://pay.example/inv) today">hi</p>`)
+		if !strings.Contains(res.HTML, `title="Pay via url(https://pay.example/inv) today"`) || len(res.RemoteRefs) != 0 {
+			t.Fatalf("%s / %+v", res.HTML, res.RemoteRefs)
+		}
+	})
+	t.Run("math backslash attr dropped", func(t *testing.T) {
+		res := san(t, `<math><mi fill="\75 rl(http://evil.test/a)">x</mi></math>`)
+		if strings.Contains(res.HTML, "evil.test") {
+			t.Fatalf("%s", res.HTML)
+		}
+	})
 }

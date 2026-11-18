@@ -78,11 +78,13 @@ var droppedElements = map[string]bool{
 	// SVG animation can rewrite attributes (e.g. href) without script.
 	"set": true, "animate": true, "animatemotion": true, "animatetransform": true,
 	"handler": true, "listener": true,
+	// <use> chains fan out exponentially in the renderer.
+	"use": true,
 }
 
 // unwrappedElements lose their tag but keep their content (OWA strips the
 // form but the recipient still sees the text inside it).
-var unwrappedElements = map[string]bool{"form": true}
+var unwrappedElements = map[string]bool{}
 
 // droppedAttrs are removed outright (on* handlers are handled separately).
 var droppedAttrs = map[string]bool{
@@ -114,6 +116,17 @@ var optionalEndTags = map[string]bool{
 var formattingElements = map[string]bool{
 	"a": true, "b": true, "big": true, "code": true, "em": true, "font": true, "i": true,
 	"nobr": true, "s": true, "small": true, "strike": true, "strong": true, "tt": true, "u": true,
+}
+
+// tableParts cannot hold a <span> child.
+var tableParts = map[string]bool{
+	"table": true, "tbody": true, "thead": true, "tfoot": true, "tr": true, "colgroup": true, "col": true,
+}
+
+// formattingMarkers push a scope marker onto the active formatting list.
+var formattingMarkers = map[string]bool{
+	"applet": true, "object": true, "marquee": true, "template": true,
+	"td": true, "th": true, "caption": true,
 }
 
 var voidElements = map[string]bool{
@@ -225,7 +238,10 @@ func OWASanitize(raw string, inlineDir string) (SanitizeResult, error) {
 		}
 	}
 	if err != nil {
-		return SanitizeResult{}, fmt.Errorf("parse body: %w", err)
+		// Never fail the whole view over one body: record it and show a
+		// placeholder instead.
+		s.drop("parse_failed")
+		return SanitizeResult{HTML: unrenderedBody, RemoteRefs: s.refs, Links: s.links, Dropped: s.dropped}, nil
 	}
 	root := &html.Node{Type: html.ElementNode, Data: "div", DataAtom: atom.Div}
 	for _, n := range nodes {
@@ -252,7 +268,104 @@ func OWASanitize(raw string, inlineDir string) (SanitizeResult, error) {
 		out = ""
 		s.drop("output_truncated")
 	}
+	if out != "" && !stableInView(out) {
+		// The browser would build a different tree from this markup than
+		// the one sanitized (a breakout from <svg>/<math>, an end tag that
+		// reaches the view's own wrappers, ...). Show none of it.
+		s.drop("unstable_markup")
+		out = unrenderedBody
+	}
 	return SanitizeResult{HTML: out, RemoteRefs: s.refs, Links: s.links, Dropped: s.dropped}, nil
+}
+
+// unrenderedBody replaces a body that cannot be shown safely.
+const unrenderedBody = `<p class="owa-remote-ref">The message body could not be rendered safely; see the sidecar.</p>`
+
+// stableInView re-parses the sanitized body inside a copy of the view's
+// wrappers, as Chromium will, and reports whether it comes back as the same
+// markup in the same place: nothing merged onto <html>/<body>, no wrapper
+// closed early, nothing moved out of the body container.
+func stableInView(body string) bool {
+	const pre = `<!doctype html><html><head></head><body><div class="owa-pane"><div class="owa-body-wrap"><div class="owa-body"><div class="owa-root">`
+	const post = `</div></div></div><div class="owa-after"></div></div></body></html>`
+	doc, err := html.Parse(strings.NewReader(pre + body + post))
+	if err != nil {
+		return false
+	}
+	// only returns the single element child of n when n has exactly that
+	// element (plus whitespace) and the expected tag and class.
+	only := func(n *html.Node, tag, class string) *html.Node {
+		var found *html.Node
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			switch c.Type {
+			case html.ElementNode:
+				if found != nil {
+					return nil
+				}
+				found = c
+			case html.TextNode:
+				if strings.TrimSpace(c.Data) != "" {
+					return nil
+				}
+			default:
+				return nil
+			}
+		}
+		if found == nil || found.Data != tag || found.Namespace != "" || !hasOnlyClass(found, class) {
+			return nil
+		}
+		return found
+	}
+	htmlEl := only(doc, "html", "")
+	if htmlEl == nil {
+		// doctype is a child of doc too
+		for c := doc.FirstChild; c != nil; c = c.NextSibling {
+			if c.Type == html.ElementNode && c.Data == "html" && hasOnlyClass(c, "") {
+				htmlEl = c
+			}
+		}
+	}
+	if htmlEl == nil {
+		return false
+	}
+	head, bodyEl := htmlEl.FirstChild, htmlEl.LastChild
+	if head == nil || head.Data != "head" || head.FirstChild != nil || len(head.Attr) != 0 ||
+		bodyEl == nil || bodyEl.Data != "body" || head.NextSibling != bodyEl || len(bodyEl.Attr) != 0 {
+		return false
+	}
+	pane := only(bodyEl, "div", "owa-pane")
+	if pane == nil {
+		return false
+	}
+	wrap := pane.FirstChild
+	after := pane.LastChild
+	if wrap == nil || after == nil || wrap.NextSibling != after ||
+		wrap.Data != "div" || !hasOnlyClass(wrap, "owa-body-wrap") ||
+		after.Data != "div" || !hasOnlyClass(after, "owa-after") || after.FirstChild != nil {
+		return false
+	}
+	bdy := only(wrap, "div", "owa-body")
+	if bdy == nil {
+		return false
+	}
+	root := only(bdy, "div", "owa-root")
+	if root == nil {
+		return false
+	}
+	var buf bytes.Buffer
+	for c := root.FirstChild; c != nil; c = c.NextSibling {
+		if err := html.Render(&buf, c); err != nil {
+			return false
+		}
+	}
+	return buf.String() == body
+}
+
+func hasOnlyClass(n *html.Node, class string) bool {
+	if class == "" {
+		return len(n.Attr) == 0
+	}
+	return len(n.Attr) == 1 && n.Attr[0].Key == "class" && n.Attr[0].Val == class
 }
 
 // depthCut tokenizes raw and returns the byte offset of the first tag that
@@ -273,8 +386,9 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 	// worst case: sum, per token, the formatting elements still active. An
 	// element stays active until its own end tag, even after an enclosing
 	// end tag popped it off the open stack.
-	var active []string
+	var active []string // "" marks a scope marker (td, marquee, ...)
 	rebuilt := 0
+	foreign := 0 // open <svg>/<math>: there "<x/>" is closed
 	for {
 		tt := z.Next()
 		if tt == html.ErrorToken {
@@ -284,7 +398,8 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 		if tt == html.StartTagToken || tt == html.SelfClosingTagToken || tt == html.TextToken || tt == html.EndTagToken {
 			// (end tags are charged too: closing one scans the active list)
 			rebuilt += len(active)
-			if rebuilt > maxRebuiltNodes {
+			if rebuilt > maxRebuiltNodes || len(stack)+len(active) > max {
+				// (re-created formatting elements deepen the tree too)
 				return off, true
 			}
 		}
@@ -292,12 +407,20 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 		case html.StartTagToken, html.SelfClosingTagToken:
 			name, _ := z.TagName()
 			tag := string(name)
+			if tt == html.SelfClosingTagToken && foreign > 0 {
+				break
+			}
 			if !voidElements[tag] && (strict || !optionalEndTags[tag]) {
 				stack = append(stack, tag)
-				if formattingElements[tag] {
+				switch {
+				case formattingElements[tag]:
 					active = append(active, tag)
+				case formattingMarkers[tag]:
+					active = append(active, "")
+				case tag == "svg" || tag == "math":
+					foreign++
 				}
-				if len(stack) > max {
+				if len(stack)+len(active) > max {
 					return off, true
 				}
 			}
@@ -305,7 +428,8 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 			name, _ := z.TagName()
 			tag := string(name)
 			if formattingElements[tag] {
-				for i := len(active) - 1; i >= 0; i-- {
+				// Only back to the last scope marker, as the parser does.
+				for i := len(active) - 1; i >= 0 && active[i] != ""; i-- {
 					if active[i] == tag {
 						active = append(active[:i], active[i+1:]...)
 						break
@@ -315,8 +439,21 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 			if !voidElements[tag] && (strict || !optionalEndTags[tag]) {
 				for i := len(stack) - 1; i >= 0; i-- {
 					if stack[i] == tag {
+						for _, t := range stack[i:] {
+							if t == "svg" || t == "math" {
+								foreign--
+							}
+						}
 						stack = stack[:i]
 						break
+					}
+				}
+				if formattingMarkers[tag] {
+					for i := len(active) - 1; i >= 0; i-- {
+						if active[i] == "" {
+							active = active[:i]
+							break
+						}
 					}
 				}
 			}
@@ -453,9 +590,22 @@ func (s *sanitizer) walk(root *html.Node) {
 			}
 			continue
 		}
+		if tag == "form" {
+			// Unwrapping a form can leave a tree the parser never builds
+			// (li>div>li), which Chromium re-parses differently. Replace it
+			// with an attribute-less <section>: also a block the parser
+			// treats as "special", but inert.
+			n.Data, n.DataAtom, n.Attr = "section", atom.Section, nil
+			tag = "section"
+			s.drop("element:form")
+		}
 		if tag == "img" || tag == "image" {
 			if ph := s.image(n); ph != nil {
-				n.Parent.InsertBefore(ph, n)
+				if !inForeign(n) {
+					// An HTML node inside <svg>/<math> makes the browser
+					// leave foreign content there: no placeholder.
+					n.Parent.InsertBefore(ph, n)
+				}
 				n.Parent.RemoveChild(n)
 				continue
 			}
@@ -476,8 +626,26 @@ func (s *sanitizer) walk(root *html.Node) {
 // content) the serializer escapes the text while Chromium reads it raw, so
 // the sanitizer's quotes would not be the browser's.
 func (s *sanitizer) hoistStyles(root *html.Node) {
-	var sheets []string
+	type sheet struct{ css, media string }
+	var sheets []sheet
 	for _, n := range s.styles {
+		media, _ := getAttr(n, "media")
+		media = strings.TrimSpace(media)
+		typ, hasType := getAttr(n, "type")
+		if hasType && strings.TrimSpace(typ) != "" && !strings.EqualFold(strings.TrimSpace(typ), "text/css") {
+			// The browser ignores a sheet of another type.
+			if n.Parent != nil {
+				n.Parent.RemoveChild(n)
+			}
+			continue
+		}
+		if !safeMedia.MatchString(media) {
+			s.drop("css:media_attr")
+			if n.Parent != nil {
+				n.Parent.RemoveChild(n)
+			}
+			continue
+		}
 		var css strings.Builder
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
 			if c.Type == html.TextNode {
@@ -488,15 +656,29 @@ func (s *sanitizer) hoistStyles(root *html.Node) {
 			n.Parent.RemoveChild(n)
 		}
 		if strings.TrimSpace(css.String()) != "" {
-			sheets = append(sheets, css.String())
+			sheets = append(sheets, sheet{css.String(), media})
 		}
 	}
 	anchor := root.FirstChild
-	for _, css := range sheets {
+	for _, sh := range sheets {
 		st := &html.Node{Type: html.ElementNode, Data: "style", DataAtom: atom.Style}
-		st.AppendChild(&html.Node{Type: html.TextNode, Data: css})
+		if sh.media != "" {
+			// media= keeps print-only or narrow-screen sheets inactive.
+			st.Attr = []html.Attribute{{Key: "media", Val: sh.media}}
+		}
+		st.AppendChild(&html.Node{Type: html.TextNode, Data: sh.css})
 		root.InsertBefore(st, anchor)
 	}
+}
+
+// inForeign reports whether n is, or sits inside, an <svg>/<math> element.
+func inForeign(n *html.Node) bool {
+	for p := n; p != nil; p = p.Parent {
+		if p.Type == html.ElementNode && p.Namespace != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // image handles <img>: returns a placeholder node when the image must not load.
@@ -511,6 +693,13 @@ func (s *sanitizer) image(n *html.Node) *html.Node {
 		for _, cand := range splitSrcset(srcset) {
 			r := s.classify(cand)
 			if r.Kind == "inline_data" {
+				// Record and extract it like a src= data image; with no
+				// src, it becomes the image's src.
+				if _, ok := s.inlineImage(cand); ok && (!hasSrc || strings.TrimSpace(src) == "") {
+					src, hasSrc = cand, true
+					removeAttr(n, "src")
+					n.Attr = append(n.Attr, html.Attribute{Key: "src", Val: cand})
+				}
 				continue
 			}
 			s.addRef(r)
@@ -596,7 +785,7 @@ func (s *sanitizer) attrs(n *html.Node, tag string) {
 			}
 			r := s.classify(v)
 			s.addRef(r)
-			if key == "background" && bgPlaceholder == nil {
+			if key == "background" && bgPlaceholder == nil && !inForeign(n) {
 				bgPlaceholder = placeholder(n, refLabel(r))
 			}
 			continue
@@ -605,12 +794,12 @@ func (s *sanitizer) attrs(n *html.Node, tag string) {
 				s.drop("attr:" + key + ":" + schemeOf(a.Val))
 				continue
 			}
-			if n.Namespace == "svg" && strings.Contains(a.Val, `\`) {
+			if n.Namespace != "" && strings.Contains(a.Val, `\`) {
 				// CSS escapes in a presentation attribute could spell url(.
 				s.drop("attr:" + key + ":escaped")
 				continue
 			}
-			if lv := strings.ToLower(a.Val); strings.Contains(lv, "image-set(") || strings.Contains(lv, "src(") {
+			if lv := strings.ToLower(a.Val); n.Namespace != "" && (strings.Contains(lv, "image-set(") || strings.Contains(lv, "src(")) {
 				// image-set() takes plain string URLs, no url() needed.
 				for _, m := range cssQuoted.FindAllStringSubmatch(a.Val, -1) {
 					s.cssRef(firstNonEmpty(m[1], m[2]))
@@ -619,7 +808,7 @@ func (s *sanitizer) attrs(n *html.Node, tag string) {
 				s.drop("attr:" + key + ":image_set")
 				continue
 			}
-			if s.attrURLs(a.Val) {
+			if n.Namespace != "" && s.attrURLs(a.Val) {
 				s.drop("attr:" + key + ":url")
 				continue
 			}
@@ -630,6 +819,16 @@ func (s *sanitizer) attrs(n *html.Node, tag string) {
 	if bgPlaceholder != nil {
 		s.generated[bgPlaceholder] = true
 		switch {
+		case tableParts[tag]:
+			// A <span> inside table structure is moved out by the parser
+			// (foster parenting): label the whole table from before it.
+			t := n
+			for t.Parent != nil && tableParts[strings.ToLower(t.Data)] && strings.ToLower(t.Data) != "table" {
+				t = t.Parent
+			}
+			if t.Parent != nil {
+				t.Parent.InsertBefore(bgPlaceholder, t)
+			}
 		case !voidElements[tag]:
 			n.InsertBefore(bgPlaceholder, n.FirstChild)
 		case n.Parent != nil:
@@ -700,7 +899,7 @@ func (s *sanitizer) href(n *html.Node, tag string, a *html.Attribute) bool {
 		span := &html.Node{Type: html.ElementNode, Data: "span", DataAtom: atom.Span,
 			Attr: []html.Attribute{{Key: "class", Val: "owa-host"}}}
 		span.AppendChild(&html.Node{Type: html.TextNode, Data: "(" + label + ")"})
-		if n.Parent != nil {
+		if n.Parent != nil && !inForeign(n) {
 			s.generated[span] = true
 			n.Parent.InsertBefore(span, n.NextSibling)
 		}
@@ -862,6 +1061,9 @@ func (s *sanitizer) inlineImage(raw string) (RemoteRef, bool) {
 // CSS
 // ---------------------------------------------------------------------------
 
+// safeMedia is a media query list made of plain tokens only.
+var safeMedia = regexp.MustCompile(`^[a-zA-Z0-9 ,:().\-]*$`)
+
 var (
 	cssComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
 	cssQuoted  = regexp.MustCompile(`"([^"]*)"|'([^']*)'`)
@@ -871,6 +1073,9 @@ var (
 // stylesheet sanitizes a style sheet and scopes every selector to .owa-body.
 func (s *sanitizer) stylesheet(css string) string {
 	css = stripCSSComments(css)
+	// CSS ignores <!-- and --> around a sheet (Word/Outlook always write
+	// them); remove them rather than let them join the first selector.
+	css = strings.NewReplacer("<!--", " ", "-->", " ").Replace(css)
 	var out strings.Builder
 	s.ruleList(css, &out, 0)
 	if badCSSString(out.String()) {

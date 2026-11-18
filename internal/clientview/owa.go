@@ -181,6 +181,17 @@ func WriteOWA(cal *icsparse.CalendarInfo, inputSHA256, outDir string) (Sidecar, 
 
 	ev, canceled, reason := SelectEvent(cal)
 
+	// The rendered body is sanitized first, so it has the first claim on
+	// the shared inline-image budget.
+	var body *SanitizeResult
+	if ev != nil && ev.AltDescRaw != nil && ev.AltDescFmtType != nil && strings.Contains(*ev.AltDescFmtType, "html") {
+		res, err := owaSanitize(*ev.AltDescRaw, filepath.Join(outDir, InlineDirName))
+		if err != nil {
+			return failView(sc, outDir, fmt.Errorf("sanitize body: %w", err))
+		}
+		body = &res
+	}
+
 	// Evidence of every event the view does not render (all of them when
 	// the view is skipped).
 	if cal != nil {
@@ -272,11 +283,8 @@ func WriteOWA(cal *icsparse.CalendarInfo, inputSHA256, outDir string) (Sidecar, 
 		}
 	}
 
-	if ev.AltDescRaw != nil && ev.AltDescFmtType != nil && strings.Contains(*ev.AltDescFmtType, "html") {
-		res, err := owaSanitize(*ev.AltDescRaw, filepath.Join(outDir, InlineDirName))
-		if err != nil {
-			return failView(sc, outDir, fmt.Errorf("sanitize body: %w", err))
-		}
+	if body != nil {
+		res := *body
 		view.BodyIsHTML = true
 		view.BodyHTML = template.HTML(res.HTML) // sanitized by OWASanitize
 		if res.RemoteRefs != nil {

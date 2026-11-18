@@ -88,3 +88,13 @@ func TestOrganizerCNWithoutSignals(t *testing.T) {
 		t.Fatalf("OrganizerCN = %q", deref(ev.OrganizerCN))
 	}
 }
+
+// A trailing HTML part that sanitizes to nothing does not replace the body
+// the preview shows.
+func TestAltDescRawFollowsPreview(t *testing.T) {
+	cal := parseInline(t, "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:q@test\r\nSUMMARY:x\r\n"+
+		"X-ALT-DESC;FMTTYPE=text/html:<p>Quarterly review agenda</p>\r\nX-ALT-DESC;FMTTYPE=text/html:<script>x</script>\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
+	if ev := cal.Events[0]; ev.AltDescRaw == nil || !strings.Contains(*ev.AltDescRaw, "Quarterly review agenda") {
+		t.Fatalf("AltDescRaw = %q", deref(ev.AltDescRaw))
+	}
+}

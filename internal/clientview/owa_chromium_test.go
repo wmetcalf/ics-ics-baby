@@ -62,6 +62,23 @@ func TestOWAForeignStyleCannotEscapeScope(t *testing.T) {
 	}
 }
 
+// Markup the parser would never build (HTML placeholders inside <svg> or
+// <math>, an unwrapped <form>) is re-parsed differently by Chromium, which
+// can then merge attributes onto <html> or close the body's wrapper divs.
+func TestOWAReparseCannotEscapeBody(t *testing.T) {
+	if _, err := render.FindChromium(""); err != nil {
+		t.Skipf("headless Chromium not available: %v", err)
+	}
+	red := `<div style="position:absolute;top:0;left:0;width:3000px;height:300px;background:#ff0000">X</div>`
+	for name, body := range map[string]string{
+		"html attrs":  `<svg><image href="http://evil.test/x.png"></image><html style="outline:300px solid #ff0000;outline-offset:-300px"></html></svg><p>hello</p>`,
+		"mi breakout": `<li><div><math><image href="cid:x"></image><mi><li></li></mi></math></div></li></div></div></div>` + red,
+		"form unwrap": `<li><div><form><li></li></form></div></li><dd><div><form><dd></dd></form></div></dd><dt><div><form><dt></dt></form></div></dt></div></div></div>` + red,
+	} {
+		t.Run(name, func(t *testing.T) { assertHeaderClean(t, body) })
+	}
+}
+
 func assertHeaderClean(t *testing.T, body string) {
 	t.Helper()
 	esc := strings.NewReplacer(`\`, `\\`, ";", `\;`, ",", `\,`, "\n", `\n`).Replace(body)
