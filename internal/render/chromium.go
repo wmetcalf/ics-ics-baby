@@ -341,7 +341,7 @@ func allowedRequest(raw, absHTML string) bool {
 	if u.RawQuery != "" || u.Fragment != "" {
 		return false
 	}
-	got := filepath.Clean(filepath.FromSlash(fileURLSlashPath(u)))
+	got := filepath.Clean(filepath.FromSlash(fileURLSlashPathFor(u, runtime.GOOS == "windows")))
 	if runtime.GOOS == "windows" {
 		return strings.EqualFold(got, absHTML)
 	}
@@ -358,11 +358,12 @@ func fileURL(absPath string) string {
 	return (&url.URL{Scheme: "file", Path: p}).String()
 }
 
-// fileURLSlashPath is the slash path of a file: URL, without the leading
-// slash before a Windows drive letter (/C:/dir -> C:/dir).
-func fileURLSlashPath(u *url.URL) string {
+// fileURLSlashPathFor is the slash path of a file: URL. On Windows the
+// leading slash before a drive letter is dropped (/C:/dir -> C:/dir); on
+// POSIX "/C:/dir" is an ordinary absolute path and is kept.
+func fileURLSlashPathFor(u *url.URL, windows bool) string {
 	p := u.Path
-	if len(p) >= 3 && p[0] == '/' && p[2] == ':' && (p[1] >= 'a' && p[1] <= 'z' || p[1] >= 'A' && p[1] <= 'Z') {
+	if windows && len(p) >= 3 && p[0] == '/' && p[2] == ':' && (p[1] >= 'a' && p[1] <= 'z' || p[1] >= 'A' && p[1] <= 'Z') {
 		return p[1:]
 	}
 	return p

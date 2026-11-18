@@ -218,8 +218,8 @@ func TestFileURLDriveLetter(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := fileURLSlashPath(u); got != want {
-			t.Fatalf("fileURLSlashPath(%q) = %q, want %q", raw, got, want)
+		if got := fileURLSlashPathFor(u, true); got != want {
+			t.Fatalf("fileURLSlashPathFor(%q) = %q, want %q", raw, got, want)
 		}
 	}
 }
@@ -252,5 +252,16 @@ func TestChromiumCSPBlockedReported(t *testing.T) {
 	}
 	if !containsSuffix(blocked, "leak.example/p.gif") {
 		t.Fatalf("blocked = %v, want the CSP-blocked image", blocked)
+	}
+}
+
+// The drive-letter form is only Windows': on POSIX "/C:/x" is a real path.
+func TestFileURLSlashPathPOSIX(t *testing.T) {
+	u, _ := url.Parse("file:///C:/case/page.html")
+	if got := fileURLSlashPathFor(u, false); got != "/C:/case/page.html" {
+		t.Fatalf("POSIX: %q", got)
+	}
+	if got := fileURLSlashPathFor(u, true); got != "C:/case/page.html" {
+		t.Fatalf("Windows: %q", got)
 	}
 }

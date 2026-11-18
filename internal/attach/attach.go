@@ -88,11 +88,13 @@ func ExtractAllLimited(cal *icsparse.CalendarInfo, outDir string, download bool,
 	var firstErr error
 	saved := 0
 	limitHit := false
+	var limitErr error
 	atLimit := func() bool {
 		if maxFiles > 0 && saved >= maxFiles {
 			if !limitHit {
 				limitHit = true
 				err := fmt.Errorf("%w: %d attachments processed, remaining attachments not saved", errAttachmentLimit, maxFiles)
+				limitErr = err
 				noteAttachmentError("attachments", err)
 				firstErr = pickFirstError(firstErr, err)
 			}
@@ -157,6 +159,10 @@ func ExtractAllLimited(cal *icsparse.CalendarInfo, outDir string, download bool,
 		}
 	}
 
+	if limitErr != nil && !errors.Is(firstErr, errAttachmentLimit) {
+		// The limit must stay visible even behind an earlier failure.
+		return errors.Join(firstErr, limitErr)
+	}
 	return firstErr
 }
 

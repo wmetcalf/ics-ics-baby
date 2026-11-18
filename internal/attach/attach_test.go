@@ -1,6 +1,7 @@
 package attach
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -91,5 +92,25 @@ func TestExtractAllLimitedCountsFailedDownloads(t *testing.T) {
 	_ = ExtractAllLimited(cal, t.TempDir(), true, 1<<20, 2)
 	if n := hits.Load(); n != 2 {
 		t.Fatalf("server saw %d requests with --max-attachments 2", n)
+	}
+}
+
+// When the cap is hit after an earlier failure, the limit is still reported.
+func TestExtractAllLimitedReportsLimitAfterFailure(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	defer srv.Close()
+	ics := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:d@test\r\nSUMMARY:dl\r\n" +
+		"ATTACH:" + srv.URL + "/a.bin\r\nATTACH:" + srv.URL + "/b.bin\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	p := filepath.Join(t.TempDir(), "d.ics")
+	if err := os.WriteFile(p, []byte(ics), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cal, err := icsparse.ParseICSFile(p, "", 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = ExtractAllLimited(cal, t.TempDir(), true, 1<<20, 1)
+	if !errors.Is(err, errAttachmentLimit) {
+		t.Fatalf("err = %v, want the attachment limit", err)
 	}
 }

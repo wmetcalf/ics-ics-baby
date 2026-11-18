@@ -270,16 +270,20 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 	// Each open formatting element can be re-created by the tree builder for
 	// every later text run or element (distinct attributes defeat the
 	// Noah's-Ark clause), so the tree can grow far past the input. Bound the
-	// worst case: sum, per token, the formatting elements still open.
-	formatting, rebuilt := 0, 0
+	// worst case: sum, per token, the formatting elements still active. An
+	// element stays active until its own end tag, even after an enclosing
+	// end tag popped it off the open stack.
+	var active []string
+	rebuilt := 0
 	for {
 		tt := z.Next()
 		if tt == html.ErrorToken {
 			return 0, false
 		}
 		n := len(z.Raw())
-		if tt == html.StartTagToken || tt == html.SelfClosingTagToken || tt == html.TextToken {
-			rebuilt += formatting
+		if tt == html.StartTagToken || tt == html.SelfClosingTagToken || tt == html.TextToken || tt == html.EndTagToken {
+			// (end tags are charged too: closing one scans the active list)
+			rebuilt += len(active)
 			if rebuilt > maxRebuiltNodes {
 				return off, true
 			}
@@ -291,7 +295,7 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 			if !voidElements[tag] && (strict || !optionalEndTags[tag]) {
 				stack = append(stack, tag)
 				if formattingElements[tag] {
-					formatting++
+					active = append(active, tag)
 				}
 				if len(stack) > max {
 					return off, true
@@ -300,14 +304,17 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 		case html.EndTagToken:
 			name, _ := z.TagName()
 			tag := string(name)
+			if formattingElements[tag] {
+				for i := len(active) - 1; i >= 0; i-- {
+					if active[i] == tag {
+						active = append(active[:i], active[i+1:]...)
+						break
+					}
+				}
+			}
 			if !voidElements[tag] && (strict || !optionalEndTags[tag]) {
 				for i := len(stack) - 1; i >= 0; i-- {
 					if stack[i] == tag {
-						for _, t := range stack[i:] {
-							if formattingElements[t] {
-								formatting--
-							}
-						}
 						stack = stack[:i]
 						break
 					}

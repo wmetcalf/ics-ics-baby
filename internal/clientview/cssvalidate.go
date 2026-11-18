@@ -119,9 +119,14 @@ func cssTokens(s string) ([]cssTok, bool) {
 }
 
 type cssStructure struct {
-	toks []cssTok
-	i    int
+	toks  []cssTok
+	i     int
+	depth int // open ( and [ blocks
 }
+
+// maxCSSBlockDepth bounds nested ( and [ blocks; real style sheets need a
+// handful, and each level would copy its contents again.
+const maxCSSBlockDepth = 32
 
 func (p *cssStructure) peek() (cssTok, bool) {
 	if p.i >= len(p.toks) {
@@ -216,6 +221,11 @@ func (p *cssStructure) simpleBlock() (string, bool) {
 	if open.kind == '[' {
 		want = ']'
 	}
+	if p.depth >= maxCSSBlockDepth {
+		return "", false
+	}
+	p.depth++
+	defer func() { p.depth-- }()
 	p.i++
 	var b strings.Builder
 	b.WriteString(open.text)

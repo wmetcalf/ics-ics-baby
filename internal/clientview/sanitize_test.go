@@ -548,3 +548,38 @@ func TestInlineImageCapSharedAcrossBodies(t *testing.T) {
 		t.Fatalf("%d bodies wrote %d inline files, cap %d", n, len(ents), maxInlineImages)
 	}
 }
+
+// Deeply nested ( in a declaration must not make CSS validation quadratic.
+func TestCSSValidateNestedParensLinear(t *testing.T) {
+	css := "p{color:" + strings.Repeat("(", 100000) + "x" + strings.Repeat(")", 100000) + "}"
+	start := time.Now()
+	if _, err := OWASanitize("<style>"+css+"</style><p>x</p>", ""); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("took %v", d)
+	}
+}
+
+// An enclosing end tag pops formatting elements off the open stack, but the
+// parser keeps them in its active list and re-creates them later.
+func TestFormattingReconstructionAfterEnclosingClose(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("<div>")
+	for i := 0; i < 450; i++ {
+		b.WriteString(`<b x=` + strconv.Itoa(i) + `>`)
+	}
+	b.WriteString("</div>")
+	b.WriteString(strings.Repeat("<p>x</p>", 20000))
+	start := time.Now()
+	res, err := OWASanitize(b.String(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("took %v", d)
+	}
+	if !contains(res.Dropped, "input_truncated") {
+		t.Fatalf("dropped = %v", res.Dropped)
+	}
+}
