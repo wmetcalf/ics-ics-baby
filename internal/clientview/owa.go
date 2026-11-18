@@ -444,6 +444,9 @@ func sanitizeParts(ev *icsparse.EventInfo, outDir string) (*SanitizeResult, erro
 			s.tokenEvidence(parts[i])
 		}
 		addEvidence(s.refs, s.links)
+		for _, d := range s.dropped { // refs_capped / links_capped
+			addDrop(d)
+		}
 	}
 	for i := len(results) - 1; i >= 0; i-- {
 		addEvidence(results[i].RemoteRefs, results[i].Links)

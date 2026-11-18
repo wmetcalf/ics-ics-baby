@@ -480,6 +480,9 @@ func writeOWAView(cal *icsparse.CalendarInfo, inputSHA, outDir string, width int
 			// The PNG stops at --chromium-max-height; the page went on.
 			sc.Dropped = append(sc.Dropped, "capture_truncated")
 		}
+		if res.BlockedCapped {
+			sc.Dropped = append(sc.Dropped, "blocked_requests_capped")
+		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "owa chromium render error: %v\n", err)
 			_ = os.Remove(pngPath)

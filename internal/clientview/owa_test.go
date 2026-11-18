@@ -514,3 +514,21 @@ func TestOWARound9(t *testing.T) {
 		t.Fatal("plain body clipped")
 	}
 }
+
+func TestSanitizePartsEarlyCapRecorded(t *testing.T) {
+	var many strings.Builder
+	for i := 0; i < maxRecorded+5; i++ {
+		many.WriteString(`<a href="https://e.example/` + strconv.Itoa(i) + `">x</a>`)
+	}
+	parts := []string{many.String()}
+	for i := 0; i < maxAltDescParts; i++ {
+		parts = append(parts, "<p>part</p>")
+	}
+	res, err := sanitizeParts(&icsparse.EventInfo{AltDescHTMLParts: parts}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(res.Dropped, "links_capped") {
+		t.Fatalf("dropped %v", res.Dropped)
+	}
+}
