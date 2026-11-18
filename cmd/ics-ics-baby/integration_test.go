@@ -660,3 +660,28 @@ func TestCLIInviteViewCaptureTruncated(t *testing.T) {
 		t.Fatalf("sidecar dropped = %v, want capture_truncated", sc["dropped"])
 	}
 }
+
+// The blastbox engine's argv on a calendar holding only a VTODO: the run
+// succeeds (preview HTML written, chromium PNG rendered, OWA view skipped).
+func TestCLIVTodoEngineArgv(t *testing.T) {
+	requireChromiumCLI(t)
+	dir := t.TempDir()
+	in := filepath.Join(dir, "todo.ics")
+	ics := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//EN\r\nBEGIN:VTODO\r\nUID:t1@test\r\nSUMMARY:Do the thing\r\nDUE:20261120T100000Z\r\nEND:VTODO\r\nEND:VCALENDAR\r\n"
+	if err := os.WriteFile(in, []byte(ics), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "o")
+	res := runCLI(t, "--out", out, "--screenshot-engine", "chromium", "--invite-view", "owa", "--findings-json", "--max-attachments", "10", in)
+	if res.exit != 0 {
+		t.Fatalf("exit %d: %s", res.exit, res.stderr)
+	}
+	for _, f := range []string{"ics-ics-baby-preview.html", "ics-ics-baby-preview.png", "ics-ics-baby-owa.json", "ics-ics-baby-findings.json"} {
+		if !fileExists(filepath.Join(out, f)) {
+			t.Fatalf("%s missing: %s", f, res.stderr)
+		}
+	}
+	if sc := readSidecar(t, out); sc["status"] != "skipped" {
+		t.Fatalf("sidecar %v", sc)
+	}
+}

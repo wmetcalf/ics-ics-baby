@@ -1782,6 +1782,10 @@ type eventDisplay struct {
 type todoDisplay struct {
 	icsparse.TodoInfo
 	DescriptionHTMLSafe template.HTML
+	// Conferences is always empty (VTODO has no CONFERENCE parsing): the
+	// shared component template reads it, and without the field every
+	// calendar holding a VTODO failed to render its preview HTML.
+	Conferences []icsparse.ConferenceInfo
 }
 
 type availabilityDisplay struct {
