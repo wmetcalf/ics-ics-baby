@@ -1,0 +1,11 @@
+{
+  "remote_refs": [
+    {
+      "kind": "remote",
+      "value": "http://evil.test/b.png",
+      "host": "evil.test"
+    }
+  ],
+  "links": null,
+  "dropped": null
+}

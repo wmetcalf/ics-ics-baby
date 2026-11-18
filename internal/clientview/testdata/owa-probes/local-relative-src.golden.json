@@ -1,0 +1,10 @@
+{
+  "remote_refs": [
+    {
+      "kind": "local",
+      "value": "logo.png"
+    }
+  ],
+  "links": null,
+  "dropped": null
+}

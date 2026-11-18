@@ -1,0 +1,11 @@
+{
+  "remote_refs": null,
+  "links": [
+    {
+      "href": "https://example.test/agenda?id=1",
+      "host": "example.test",
+      "text": "the agenda"
+    }
+  ],
+  "dropped": null
+}

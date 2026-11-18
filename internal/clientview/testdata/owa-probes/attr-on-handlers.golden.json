@@ -1,0 +1,17 @@
+{
+  "remote_refs": [
+    {
+      "kind": "inline_data",
+      "value": "data:image/gif",
+      "path": "ics-ics-baby-inline/2f41918f848b5fb01cd6731a4f8e50a6d5bb3b78fcc34d0a419052672fb72af3.gif",
+      "sha256": "2f41918f848b5fb01cd6731a4f8e50a6d5bb3b78fcc34d0a419052672fb72af3",
+      "mime": "image/gif"
+    }
+  ],
+  "links": null,
+  "dropped": [
+    "attr:onclick",
+    "attr:onmouseover",
+    "attr:onerror"
+  ]
+}
