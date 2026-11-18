@@ -63,3 +63,28 @@ func deref(s *string) string {
 	}
 	return *s
 }
+
+// The view's body follows the preview: a non-empty HTML X-ALT-DESC wins
+// over a plain or empty one, whichever comes first.
+func TestAltDescRawPrefersHTML(t *testing.T) {
+	for name, props := range map[string]string{
+		"plain first": "X-ALT-DESC;FMTTYPE=text/plain:See HTML version\r\nX-ALT-DESC;FMTTYPE=text/html:<a href=\"https://evil.example/p\">here</a>\r\n",
+		"empty first": "X-ALT-DESC;FMTTYPE=text/html: \r\nX-ALT-DESC;FMTTYPE=text/html:<a href=\"https://evil.example/p\">here</a>\r\n",
+	} {
+		cal := parseInline(t, "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:p@test\r\nSUMMARY:x\r\n"+props+"END:VEVENT\r\nEND:VCALENDAR\r\n")
+		ev := cal.Events[0]
+		if ev.AltDescRaw == nil || !strings.Contains(*ev.AltDescRaw, "evil.example") || ev.AltDescFmtType == nil || *ev.AltDescFmtType != "text/html" {
+			t.Fatalf("%s: AltDescRaw = %q (%q)", name, deref(ev.AltDescRaw), deref(ev.AltDescFmtType))
+		}
+	}
+}
+
+// The organizer's display name is known whether or not an alert fired.
+func TestOrganizerCNWithoutSignals(t *testing.T) {
+	cal := parseInline(t, "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:c@test\r\nSUMMARY:x\r\n"+
+		"ORGANIZER;CN=\"Microsoft Security Team\":mailto:attacker@evil.example\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
+	ev := cal.Events[0]
+	if ev.OrganizerCN == nil || *ev.OrganizerCN != "Microsoft Security Team" {
+		t.Fatalf("OrganizerCN = %q", deref(ev.OrganizerCN))
+	}
+}

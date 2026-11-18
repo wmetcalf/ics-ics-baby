@@ -91,6 +91,8 @@ type EventInfo struct {
 	AltDescRaw *string `json:"-"`
 	// AltDescFmtType is that X-ALT-DESC's FMTTYPE parameter, lower-cased.
 	AltDescFmtType *string `json:"-"`
+	// OrganizerCN is the ORGANIZER's CN parameter (display name), if any.
+	OrganizerCN *string `json:"-"`
 	// Findings are the stable-coded forms of this event's alert strings.
 	Findings []Finding `json:"-"`
 }
@@ -816,13 +818,24 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 				for k, v := range params {
 					organizerParams[k] = v
 				}
+				if cn := params["CN"]; cn != "" {
+					ev.OrganizerCN = ptr(cn)
+				}
 			case "X-ALT-DESC":
 				descEvent.absorbAltDescription(value, params)
 				ev.RawProps = addRawProp(ev.RawProps, up, value)
-				if ev.AltDescRaw == nil {
-					ev.AltDescRaw = ptr(unescapeICSTextExact(value))
-					if ft, ok := params["FMTTYPE"]; ok {
-						ev.AltDescFmtType = ptr(strings.ToLower(strings.TrimSpace(ft)))
+				// Like the preview: the last non-empty HTML body wins; without
+				// one, the first X-ALT-DESC is kept.
+				ft := strings.ToLower(strings.TrimSpace(params["FMTTYPE"]))
+				raw := unescapeICSTextExact(value)
+				curHTML := ev.AltDescFmtType != nil && strings.Contains(*ev.AltDescFmtType, "html") &&
+					ev.AltDescRaw != nil && strings.TrimSpace(*ev.AltDescRaw) != ""
+				if ev.AltDescRaw == nil || (strings.Contains(ft, "html") && strings.TrimSpace(raw) != "") ||
+					(!curHTML && strings.TrimSpace(*ev.AltDescRaw) == "" && strings.TrimSpace(raw) != "") {
+					ev.AltDescRaw = ptr(raw)
+					ev.AltDescFmtType = nil
+					if _, ok := params["FMTTYPE"]; ok {
+						ev.AltDescFmtType = ptr(ft)
 					}
 				}
 			case "DTSTART":
@@ -1723,7 +1736,8 @@ func detectOpenRedirectPatterns(urlStr string) []string {
 		"www.google.com/url?":           "Google URL redirector - trusted domain used for redirect chain",
 	}
 
-	for indicator, explanation := range googleRedirectIndicators {
+	for _, indicator := range sortedKeys(googleRedirectIndicators) {
+		explanation := googleRedirectIndicators[indicator]
 		if strings.Contains(lowerURL, indicator) {
 			patterns = append(patterns, fmt.Sprintf("TRUSTED DOMAIN ABUSE: %s (%s bypasses calendar client trust checks)", indicator, explanation))
 		}

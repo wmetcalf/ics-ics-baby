@@ -282,3 +282,41 @@ func TestOWAOtherEventEvidence(t *testing.T) {
 		t.Fatalf("json: %s", b)
 	}
 }
+
+// The organizer's display name is what OWA shows, alert or no alert.
+func TestOWAOrganizerCNWithoutSignals(t *testing.T) {
+	_, html, _ := writeOWA(t, parseICS(t, invite("REQUEST")))
+	if !strings.Contains(html, `<div class="owa-from-name">Pat Doe</div>`) {
+		t.Fatalf("organizer CN not shown: %s", html)
+	}
+}
+
+// A skipped view renders no event, so every event's evidence is recorded.
+func TestOWASkippedRecordsEvidence(t *testing.T) {
+	cal := parseICS(t, invite("ADD", "X-MICROSOFT-SKYPETEAMSMEETINGURL:https://evil.test/join",
+		`X-ALT-DESC;FMTTYPE=text/html:<a href="https://evil.test/login">x</a>`))
+	sc, _, _ := writeOWA(t, cal)
+	if sc.Status != "skipped" {
+		t.Fatalf("status %q", sc.Status)
+	}
+	if len(sc.OtherEventDetails) != 1 || sc.OtherEventDetails[0].JoinURL != "https://evil.test/join" || len(sc.OtherEventDetails[0].Links) != 1 {
+		t.Fatalf("other_event_details = %+v", sc.OtherEventDetails)
+	}
+}
+
+// One hostile body (stray end tags or self-closing divs defeating the depth
+// guard) must not fail the whole view.
+func TestOWADeepBodyDoesNotFailView(t *testing.T) {
+	for name, body := range map[string]string{
+		"stray end tags": strings.Repeat("<div></span>", 600),
+		"self-closing":   strings.Repeat("<div/>", 600),
+	} {
+		res, err := OWASanitize(body+"x", "")
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !contains(res.Dropped, "depth_limit") {
+			t.Fatalf("%s: dropped = %v", name, res.Dropped)
+		}
+	}
+}

@@ -180,6 +180,27 @@ func WriteOWA(cal *icsparse.CalendarInfo, inputSHA256, outDir string) (Sidecar, 
 	view := owaView{InputSHA256: inputSHA256}
 
 	ev, canceled, reason := SelectEvent(cal)
+
+	// Evidence of every event the view does not render (all of them when
+	// the view is skipped).
+	if cal != nil {
+		for i := range cal.Events {
+			if &cal.Events[i] == ev {
+				continue
+			}
+			if len(sc.OtherEvents) >= maxOtherEvents {
+				sc.Dropped = append(sc.Dropped, "other_events_capped")
+				break
+			}
+			sc.OtherEvents = append(sc.OtherEvents, cal.Events[i].Summary)
+			d, err := eventEvidence(&cal.Events[i], outDir)
+			if err != nil {
+				return failView(sc, outDir, fmt.Errorf("sanitize event %d body: %w", i+1, err))
+			}
+			sc.OtherEventDetails = append(sc.OtherEventDetails, d)
+		}
+	}
+
 	if ev == nil {
 		sc.Status = "skipped"
 		sc.Reason = reason
@@ -191,21 +212,6 @@ func WriteOWA(cal *icsparse.CalendarInfo, inputSHA256, outDir string) (Sidecar, 
 	if ev.UID != nil {
 		sc.EventUID = *ev.UID
 	}
-	for i := range cal.Events {
-		if &cal.Events[i] == ev {
-			continue
-		}
-		if len(sc.OtherEvents) >= maxOtherEvents {
-			sc.Dropped = append(sc.Dropped, "other_events_capped")
-			break
-		}
-		sc.OtherEvents = append(sc.OtherEvents, cal.Events[i].Summary)
-		d, err := eventEvidence(&cal.Events[i], outDir)
-		if err != nil {
-			return failView(sc, outDir, fmt.Errorf("sanitize event %d body: %w", i+1, err))
-		}
-		sc.OtherEventDetails = append(sc.OtherEventDetails, d)
-	}
 	view.OtherEvents = sc.OtherEvents
 
 	view.Canceled = canceled
@@ -215,7 +221,9 @@ func WriteOWA(cal *icsparse.CalendarInfo, inputSHA256, outDir string) (Sidecar, 
 	}
 
 	view.OrganizerAddr = organizerAddress(ev.Organizer)
-	if ev.AutoprocessingSignals != nil && ev.AutoprocessingSignals.OrganizerDetails != nil && ev.AutoprocessingSignals.OrganizerDetails.CN != nil {
+	if ev.OrganizerCN != nil {
+		view.OrganizerName = strings.TrimSpace(*ev.OrganizerCN)
+	} else if ev.AutoprocessingSignals != nil && ev.AutoprocessingSignals.OrganizerDetails != nil && ev.AutoprocessingSignals.OrganizerDetails.CN != nil {
 		view.OrganizerName = strings.TrimSpace(*ev.AutoprocessingSignals.OrganizerDetails.CN)
 	}
 	if view.OrganizerName == "" {

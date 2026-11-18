@@ -243,7 +243,13 @@ func OWASanitize(raw string, inlineDir string) (SanitizeResult, error) {
 // With strict, elements with optional end tags count too.
 func depthCut(raw string, max int, strict bool) (int, bool) {
 	z := html.NewTokenizer(strings.NewReader(raw))
-	depth, off := 0, 0
+	// The stack mirrors the tree builder closely enough to bound depth: an
+	// end tag closes only an element that is open (a stray </span> does not
+	// lower the count), and "<div/>" opens a div in HTML content. In foreign
+	// content a self-closing tag is closed, so this over-counts there; that
+	// only cuts sooner.
+	var stack []string
+	off := 0
 	for {
 		tt := z.Next()
 		if tt == html.ErrorToken {
@@ -251,20 +257,25 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 		}
 		n := len(z.Raw())
 		switch tt {
-		case html.StartTagToken:
+		case html.StartTagToken, html.SelfClosingTagToken:
 			name, _ := z.TagName()
 			tag := string(name)
 			if !voidElements[tag] && (strict || !optionalEndTags[tag]) {
-				depth++
-				if depth > max {
+				stack = append(stack, tag)
+				if len(stack) > max {
 					return off, true
 				}
 			}
 		case html.EndTagToken:
 			name, _ := z.TagName()
 			tag := string(name)
-			if !voidElements[tag] && (strict || !optionalEndTags[tag]) && depth > 0 {
-				depth--
+			if !voidElements[tag] && (strict || !optionalEndTags[tag]) {
+				for i := len(stack) - 1; i >= 0; i-- {
+					if stack[i] == tag {
+						stack = stack[:i]
+						break
+					}
+				}
 			}
 		}
 		off += n

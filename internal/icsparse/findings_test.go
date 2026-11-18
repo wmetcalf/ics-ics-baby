@@ -169,3 +169,16 @@ func TestHeaderAlertOrderDeterministic(t *testing.T) {
 		}
 	}
 }
+
+// A URL matching two redirect indicators yields its patterns in a fixed order.
+func TestRedirectPatternOrderDeterministic(t *testing.T) {
+	first := ""
+	for i := 0; i < 40; i++ {
+		got := strings.Join(detectOpenRedirectPatterns("https://www.google.com/url?q=https://evil.example/"), "\n")
+		if i == 0 {
+			first = got
+		} else if got != first {
+			t.Fatalf("call %d gave a different pattern order", i)
+		}
+	}
+}
