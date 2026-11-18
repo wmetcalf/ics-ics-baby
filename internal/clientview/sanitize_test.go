@@ -1,12 +1,16 @@
 package clientview
 
 import (
+	"errors"
+	"io"
+
 	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
+	"golang.org/x/net/html"
 	"image"
 	"image/png"
 	"os"
@@ -802,5 +806,38 @@ func TestFragmentRefsFollowIDPrefix(t *testing.T) {
 		if !strings.Contains(res.HTML, want) {
 			t.Errorf("missing %s in %s", want, res.HTML)
 		}
+	}
+}
+
+func TestParseFailureKeepsTokenEvidence(t *testing.T) {
+	orig := parseFragment
+	parseFragment = func(io.Reader, *html.Node) ([]*html.Node, error) {
+		return nil, errors.New("injected")
+	}
+	defer func() { parseFragment = orig }()
+	res, err := OWASanitize(`<p><a href="https://evil.example/pay">Pay</a><img src="https://t.example/p.gif"></p>`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(res.Dropped, "parse_failed") || len(res.Links) != 1 || len(res.RemoteRefs) != 1 || !strings.Contains(res.HTML, "could not be rendered") {
+		t.Fatalf("%s / %v / %v / %v", res.HTML, res.Dropped, res.Links, res.RemoteRefs)
+	}
+}
+
+func TestDepthCutForeignRules(t *testing.T) {
+	// A self-closing <svg/> is closed: later <abbr/> (not a breakout) open
+	// HTML elements and must be counted.
+	res, err := OWASanitize(`<svg width="0" height="0"/>`+strings.Repeat("<abbr/>", 520), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contains(res.Dropped, "parse_failed") || !contains(res.Dropped, "depth_limit") {
+		t.Fatalf("dropped %v", res.Dropped)
+	}
+	// svg/math elements with table names are dropped (x/net/html resets its
+	// insertion mode on them regardless of namespace).
+	res, _ = OWASanitize(`<svg><td>x</td><select></select></svg>`, "")
+	if !contains(res.Dropped, "element:foreign_td") || !contains(res.Dropped, "element:foreign_select") {
+		t.Fatalf("dropped %v", res.Dropped)
 	}
 }

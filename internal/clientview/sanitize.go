@@ -157,6 +157,14 @@ var formattingMarkers = map[string]bool{
 	"td": true, "th": true, "caption": true,
 }
 
+// ignoredInBody start tags are dropped by the parser outside a table (or
+// only merge attributes), so text on both sides joins one text node.
+var ignoredInBody = map[string]bool{
+	"tr": true, "td": true, "th": true, "tbody": true, "thead": true, "tfoot": true,
+	"col": true, "colgroup": true, "caption": true, "html": true, "head": true,
+	"body": true, "frameset": true, "frame": true,
+}
+
 // htmlBreakout start tags make the parser leave <svg>/<math> content.
 var htmlBreakout = map[string]bool{
 	"b": true, "big": true, "blockquote": true, "body": true, "br": true, "center": true,
@@ -187,6 +195,7 @@ type sanitizer struct {
 	inlineSeen   map[string]bool // inline image files written
 	inlineFiles  int             // files in inlineDir, this body's included
 	inlinePixels int64           // decoded pixels of the kept inline images
+	pixelSeen    map[string]bool // sha256 of images already charged
 	styles       []*html.Node    // sanitized <style> elements, in order
 }
 
@@ -198,6 +207,7 @@ func newSanitizer(inlineDir string) *sanitizer {
 		linkSeen:    map[string]bool{},
 		droppedSeen: map[string]bool{},
 		inlineSeen:  map[string]bool{},
+		pixelSeen:   map[string]bool{},
 	}
 	if inlineDir != "" {
 		// The cap is per directory: every body of one view shares it.
@@ -272,7 +282,7 @@ func OWASanitize(raw string, inlineDir string) (SanitizeResult, error) {
 			s.drop("depth_limit")
 		}
 		ctx := &html.Node{Type: html.ElementNode, Data: "div", DataAtom: atom.Div}
-		nodes, err = html.ParseFragment(strings.NewReader(in), ctx)
+		nodes, err = parseFragment(strings.NewReader(in), ctx)
 		if err == nil {
 			break
 		}
@@ -321,6 +331,9 @@ func OWASanitize(raw string, inlineDir string) (SanitizeResult, error) {
 	}
 	return SanitizeResult{HTML: out, RemoteRefs: s.refs, Links: s.links, Dropped: s.dropped}, nil
 }
+
+// parseFragment is html.ParseFragment; a variable so tests can make it fail.
+var parseFragment = html.ParseFragment
 
 // tokenEvidence records links and resource references from the raw tokens
 // of a body the parser could not build, so its evidence still reaches the
@@ -462,27 +475,31 @@ func hasOnlyClass(n *html.Node, class string) bool {
 // With strict, elements with optional end tags count too.
 func depthCut(raw string, max int, strict bool) (int, bool) {
 	z := html.NewTokenizer(strings.NewReader(raw))
-	// The model mirrors the tree builder closely enough to bound the tree:
-	//  - stack: open elements. An end tag closes only an element that is
-	//    open (a stray </span> does not lower it); "<div/>" opens a div in
-	//    HTML content but is closed inside <svg>/<math>.
-	//  - active: the active formatting elements. One stays active until its
-	//    own end tag, even after an enclosing end tag popped it off the
-	//    stack, and the parser re-creates it (distinct attributes defeat the
-	//    Noah's-Ark clause) for later text: that adds depth and nodes.
-	//    "|"-prefixed entries are scope markers (cells, captions, marquee,
-	//    object, applet, template) that end tags do not reach past.
+	// A model of the tree builder that bounds what x/net/html will build.
+	// Where it cannot follow the parser exactly it errs toward the larger
+	// tree, so the bounds hold and only truncation comes sooner:
+	//  - stack: open elements. An end tag closes only an open element (a
+	//    stray </span> does not lower it); "<div/>" opens a div in HTML
+	//    content but is closed inside <svg>/<math>.
+	//  - active: the active formatting elements (tag plus attributes). One
+	//    stays active until its own end tag, even after an enclosing end tag
+	//    popped it off the stack, and the parser re-creates it for later
+	//    text: that adds depth and nodes. The Noah's-Ark clause keeps at most
+	//    three identical entries, as the parser does. "|"-prefixed entries
+	//    are scope markers (cells, captions, marquee, object, applet,
+	//    template) that end tags do not reach past. A marker is removed by
+	//    its own end tag only and never clears the entries after it: a <td>
+	//    outside a table is ignored by the parser, which then keeps them.
 	var stack, active []string
-	onStack := 0 // formatting elements that are also on the stack
-	nActive := 0 // formatting (non-marker) entries in active
+	onStack, nFmt, tables, foreignOpen := 0, 0, 0, 0
 	depth := func() int {
-		extra := nActive - onStack
+		extra := nFmt - onStack
 		if extra < 0 {
 			extra = 0
 		}
 		return len(stack) + extra
 	}
-	foreign := func() bool {
+	foreign := func() bool { // the insertion point is in svg/math content
 		for i := len(stack) - 1; i >= 0; i-- {
 			switch stack[i] {
 			case "svg", "math":
@@ -493,40 +510,36 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 		}
 		return false
 	}
+	push := func(tag string) {
+		stack = append(stack, tag)
+		switch {
+		case formattingElements[tag]:
+			onStack++
+		case tag == "table":
+			tables++
+		case tag == "svg" || tag == "math":
+			foreignOpen++
+		}
+	}
 	pop := func(i int) { // close stack[i:]
 		for _, t := range stack[i:] {
-			if formattingElements[t] {
+			switch {
+			case formattingElements[t]:
 				onStack--
+			case t == "table":
+				tables--
+			case t == "svg" || t == "math":
+				foreignOpen--
 			}
 		}
 		stack = stack[:i]
 	}
-	popMarker := func(markers ...string) { // drop active back past a marker
-		if len(active) == 0 {
-			return
-		}
-		for i := len(active) - 1; i >= 0; i-- {
-			if active[i][0] == '|' {
-				for _, m := range markers {
-					if active[i] == "|"+m {
-						for _, a := range active[i:] {
-							if a[0] != '|' {
-								nActive--
-							}
-						}
-						active = active[:i]
-						return
-					}
-				}
-				return
-			}
-		}
-	}
 	off := 0
 	rebuilt := 0
 	// The parser appends each text token to an adjacent text node
-	// (n.Data += text) when only ignored tags separate them: "a</x>" x 400k
-	// copies quadratically. Track the growing node and the bytes copied.
+	// (n.Data += text) when only ignored tags separate them: "a</x>" or
+	// "a<tr>" (outside a table) x 400k copies quadratically. Track the
+	// growing node and the bytes copied.
 	merging, mergeLen, merged := false, 0, 0
 	for {
 		tt := z.Next()
@@ -534,8 +547,7 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 			return 0, false
 		}
 		n := len(z.Raw())
-		switch tt {
-		case html.TextToken:
+		if tt == html.TextToken {
 			if merging {
 				merged += mergeLen
 				mergeLen += n
@@ -545,27 +557,44 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 			if merged > maxMergedText {
 				return off, true
 			}
-		case html.StartTagToken, html.SelfClosingTagToken, html.CommentToken:
-			merging = false
 		}
 		if tt == html.StartTagToken || tt == html.SelfClosingTagToken || tt == html.TextToken || tt == html.EndTagToken {
-			// (end tags are charged too: closing one scans the active list)
-			rebuilt += len(active)
+			rebuilt += nFmt
 			if rebuilt > maxRebuiltNodes || depth() > max {
 				return off, true
 			}
 		}
 		switch tt {
+		case html.CommentToken:
+			merging = false
 		case html.StartTagToken, html.SelfClosingTagToken:
-			name, _ := z.TagName()
+			name, hasAttr := z.TagName()
 			tag := string(name)
-			inForeignContent := foreign()
-			if inForeignContent && !htmlBreakout[tag] && tt == html.StartTagToken {
-				// <title>/<style>/... inside svg/math hold markup, not raw
-				// text: the parser reads them that way.
+			var attrs strings.Builder
+			fontBreakout := false
+			for hasAttr {
+				var k, v []byte
+				k, v, hasAttr = z.TagAttr()
+				attrs.Write(k)
+				attrs.WriteByte('=')
+				attrs.Write(v)
+				attrs.WriteByte(0)
+				switch string(k) {
+				case "color", "face", "size":
+					fontBreakout = true
+				}
+			}
+			if foreignOpen > 0 {
+				// Inside svg/math, <style>, <title>, ... hold markup for the
+				// parser (in an HTML integration point they would not; read
+				// as markup there too, which only over-counts).
 				z.NextIsNotRawText()
 			}
-			if inForeignContent && htmlBreakout[tag] {
+			if !ignoredInBody[tag] || tables > 0 {
+				merging = false
+			}
+			inForeignContent := foreign()
+			if inForeignContent && htmlBreakout[tag] && (tag != "font" || fontBreakout) {
 				// The parser leaves foreign content here: close it.
 				for i := len(stack) - 1; i >= 0; i-- {
 					if stack[i] == "svg" || stack[i] == "math" {
@@ -575,29 +604,31 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 				}
 				inForeignContent = foreign()
 			}
-			switch tag {
-			case "td", "th":
-				popMarker("td", "th")
-			case "tr", "tbody", "thead", "tfoot":
-				popMarker("td", "th", "caption")
-			}
 			if tt == html.SelfClosingTagToken && (inForeignContent || tag == "svg" || tag == "math") {
 				break // closed at once
-			}
-			if voidElements[tag] {
-				break
 			}
 			if formattingMarkers[tag] {
 				active = append(active, "|"+tag)
 			}
-			if !strict && optionalEndTags[tag] {
+			if voidElements[tag] || (!strict && optionalEndTags[tag]) {
 				break
 			}
-			stack = append(stack, tag)
+			push(tag)
 			if formattingElements[tag] {
-				active = append(active, tag)
-				nActive++
-				onStack++
+				key := tag + "\x00" + attrs.String()
+				same, first := 0, -1
+				for i := len(active) - 1; i >= 0 && active[i][0] != '|'; i-- {
+					if active[i] == key {
+						same++
+						first = i
+					}
+				}
+				if same >= 3 {
+					active = append(active[:first], active[first+1:]...)
+					nFmt--
+				}
+				active = append(active, key)
+				nFmt++
 			}
 			if depth() > max {
 				return off, true
@@ -608,22 +639,23 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 			if formattingElements[tag] {
 				// Only back to the last scope marker, as the parser does.
 				for i := len(active) - 1; i >= 0 && active[i][0] != '|'; i-- {
-					if active[i] == tag {
+					if strings.HasPrefix(active[i], tag+"\x00") {
 						active = append(active[:i], active[i+1:]...)
-						nActive--
+						nFmt--
 						break
 					}
 				}
 			}
-			switch tag {
-			case "td", "th":
-				popMarker("td", "th")
-			case "tr", "tbody", "thead", "tfoot", "table":
-				popMarker("td", "th", "caption")
-			default:
-				if formattingMarkers[tag] {
-					popMarker(tag)
+			if formattingMarkers[tag] {
+				for i := len(active) - 1; i >= 0; i-- {
+					if active[i] == "|"+tag {
+						active = append(active[:i], active[i+1:]...)
+						break
+					}
 				}
+			}
+			if tables > 0 && ignoredInBody[tag] {
+				merging = false
 			}
 			if voidElements[tag] || (!strict && optionalEndTags[tag]) {
 				break
@@ -859,6 +891,34 @@ func (s *sanitizer) hoistStyles(root *html.Node) {
 		st.AppendChild(&html.Node{Type: html.TextNode, Data: sh.css})
 		root.InsertBefore(st, anchor)
 	}
+}
+
+// imageSize reads an inline image's pixel size from its header. Chromium
+// decodes more BMP variants than x/image/bmp, so a BMP header is read
+// directly when DecodeConfig gives up.
+func imageSize(data []byte) (w, h int, ok bool) {
+	if cfg, _, err := image.DecodeConfig(bytes.NewReader(data)); err == nil {
+		return cfg.Width, cfg.Height, true
+	}
+	if len(data) < 26 || data[0] != 'B' || data[1] != 'M' {
+		return 0, 0, false
+	}
+	le32 := func(b []byte) int64 {
+		return int64(int32(uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16 | uint32(b[3])<<24))
+	}
+	var ww, hh int64
+	if le32(data[14:18]) == 12 { // OS/2 BITMAPCOREHEADER: 16-bit sizes
+		ww, hh = int64(uint16(data[18])|uint16(data[19])<<8), int64(uint16(data[20])|uint16(data[21])<<8)
+	} else {
+		ww, hh = le32(data[18:22]), le32(data[22:26])
+	}
+	if hh < 0 {
+		hh = -hh
+	}
+	if ww <= 0 || hh <= 0 || ww > 1<<20 || hh > 1<<20 {
+		return 0, 0, false
+	}
+	return int(ww), int(hh), true
 }
 
 // inForeign reports whether n is, or sits inside, an <svg>/<math> element.
@@ -1226,20 +1286,25 @@ func (s *sanitizer) inlineImage(raw string) (RemoteRef, bool) {
 	// The renderer decodes the whole bitmap whatever size it is shown at:
 	// a 51 KB 16000x16000 PNG costs ~1 GB. Bound the pixels per image and
 	// per body.
-	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil {
-		s.drop("data_image_malformed")
-		return RemoteRef{}, false
-	}
-	px := int64(cfg.Width) * int64(cfg.Height)
-	if px > maxInlinePixels || s.inlinePixels+px > maxInlinePixelsTotal {
-		s.drop("data_image_too_many_pixels")
-		return RemoteRef{}, false
-	}
-	s.inlinePixels += px
 	sum := sha256.Sum256(data)
 	sha := hex.EncodeToString(sum[:])
 	r := RemoteRef{Kind: "inline_data", Value: "data:" + mime, SHA256: sha, Mime: mime}
+	if !s.pixelSeen[sha] {
+		w, h, ok := imageSize(data)
+		if !ok {
+			s.drop("data_image_malformed")
+			s.addRef(r) // dropped, but still evidence
+			return RemoteRef{}, false
+		}
+		px := int64(w) * int64(h)
+		if px > maxInlinePixels || s.inlinePixels+px > maxInlinePixelsTotal {
+			s.drop("data_image_too_many_pixels")
+			s.addRef(r)
+			return RemoteRef{}, false
+		}
+		s.inlinePixels += px // each distinct image once
+		s.pixelSeen[sha] = true
+	}
 	if s.inlineDir != "" {
 		name := sha + "." + ext
 		if !s.inlineSeen[name] {

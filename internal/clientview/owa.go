@@ -313,54 +313,82 @@ func WriteOWA(cal *icsparse.CalendarInfo, inputSHA256, outDir string) (Sidecar, 
 // maxAltDescParts bounds the HTML X-ALT-DESC parts sanitized per event.
 const maxAltDescParts = 8
 
-// sanitizeParts sanitizes every FMTTYPE=text/html X-ALT-DESC of ev (nil when
-// it has none). The evidence of all parts is merged; the HTML is the last
-// part with visible content (text or an image), else the last part, so a
-// trailing empty or script-only part does not blank the body and an earlier
-// part's references are never lost.
+// sanitizeParts sanitizes the FMTTYPE=text/html X-ALT-DESC parts of ev
+// (nil when it has none). The HTML is the last part with visible content
+// (text or an image), else the last part: the preview also shows the last
+// HTML part, and a trailing empty or script-only part does not blank the
+// body. Parts are sanitized last first, so the shown part has the first
+// claim on the shared inline-image budget. Only the last maxAltDescParts
+// are sanitized; the links and references of earlier ones are read from
+// their tokens. The evidence of every part is merged; drop codes of parts
+// that are not shown are prefixed "alt_part:".
 func sanitizeParts(ev *icsparse.EventInfo, outDir string) (*SanitizeResult, error) {
 	parts := ev.AltDescHTMLParts
 	if len(parts) == 0 {
 		return nil, nil
 	}
 	merged := &SanitizeResult{}
-	if len(parts) > maxAltDescParts {
-		parts = parts[:maxAltDescParts]
-		merged.Dropped = append(merged.Dropped, "alt_desc_parts_capped")
-	}
 	refSeen, linkSeen, dropSeen := map[RemoteRef]bool{}, map[Link]bool{}, map[string]bool{}
-	for _, d := range merged.Dropped {
-		dropSeen[d] = true
-	}
-	chosen, chosenVisible := "", false
-	for _, part := range parts {
-		res, err := owaSanitize(part, filepath.Join(outDir, InlineDirName))
-		if err != nil {
-			return nil, err
+	addDrop := func(d string) {
+		if !dropSeen[d] {
+			dropSeen[d] = true
+			merged.Dropped = append(merged.Dropped, d)
 		}
-		for _, r := range res.RemoteRefs {
+	}
+	addEvidence := func(refs []RemoteRef, links []Link) {
+		for _, r := range refs {
 			if !refSeen[r] {
 				refSeen[r] = true
 				merged.RemoteRefs = append(merged.RemoteRefs, r)
 			}
 		}
-		for _, l := range res.Links {
+		for _, l := range links {
 			if !linkSeen[l] {
 				linkSeen[l] = true
 				merged.Links = append(merged.Links, l)
 			}
 		}
-		for _, d := range res.Dropped {
-			if !dropSeen[d] {
-				dropSeen[d] = true
-				merged.Dropped = append(merged.Dropped, d)
-			}
+	}
+	var results []SanitizeResult // last part first
+	chosen := -1
+	start := 0
+	if len(parts) > maxAltDescParts {
+		start = len(parts) - maxAltDescParts
+	}
+	for i := len(parts) - 1; i >= start; i-- {
+		res, err := owaSanitize(parts[i], filepath.Join(outDir, InlineDirName))
+		if err != nil {
+			return nil, err
 		}
-		if v := visibleHTML(res.HTML); v || !chosenVisible {
-			chosen, chosenVisible = res.HTML, v
+		results = append(results, res)
+		if chosen < 0 && visibleHTML(res.HTML) {
+			chosen = len(results) - 1
 		}
 	}
-	merged.HTML = chosen
+	if chosen < 0 {
+		chosen = 0 // the last part
+	}
+	merged.HTML = results[chosen].HTML
+	for _, d := range results[chosen].Dropped {
+		addDrop(d)
+	}
+	if start > 0 {
+		addDrop("alt_desc_parts_capped")
+	}
+	// Evidence in document order: earliest part first.
+	for i := 0; i < start; i++ {
+		s := newSanitizer("")
+		s.tokenEvidence(parts[i])
+		addEvidence(s.refs, s.links)
+	}
+	for i := len(results) - 1; i >= 0; i-- {
+		addEvidence(results[i].RemoteRefs, results[i].Links)
+		if i != chosen {
+			for _, d := range results[i].Dropped {
+				addDrop("alt_part:" + d)
+			}
+		}
+	}
 	return merged, nil
 }
 
