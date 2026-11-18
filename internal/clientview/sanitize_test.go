@@ -457,3 +457,22 @@ func TestBadCSSStringDropped(t *testing.T) {
 		}
 	}
 }
+
+// SVG presentation attributes (fill, filter, mask, ...) can reference
+// resources with url(); remote ones are recorded and the attribute dropped,
+// in-document fragments (gradients) are kept.
+func TestSVGPresentationURLRecorded(t *testing.T) {
+	res, err := OWASanitize(`<svg><rect fill="url(https://evil.test/p.svg#x)"></rect><rect fill="url(#grad)"></rect><rect filter="u\72l(https://evil.test/f)"></rect></svg>`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.HTML, "evil.test") {
+		t.Fatalf("remote url() survived: %s", res.HTML)
+	}
+	if !strings.Contains(res.HTML, `fill="url(#grad)"`) {
+		t.Fatalf("fragment url() lost: %s", res.HTML)
+	}
+	if len(res.RemoteRefs) != 1 || res.RemoteRefs[0].Host != "evil.test" {
+		t.Fatalf("RemoteRefs = %+v", res.RemoteRefs)
+	}
+}

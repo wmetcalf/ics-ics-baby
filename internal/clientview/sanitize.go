@@ -521,6 +521,15 @@ func (s *sanitizer) attrs(n *html.Node, tag string) {
 				s.drop("attr:" + key + ":" + schemeOf(a.Val))
 				continue
 			}
+			if n.Namespace == "svg" && strings.Contains(a.Val, `\`) {
+				// CSS escapes in a presentation attribute could spell url(.
+				s.drop("attr:" + key + ":escaped")
+				continue
+			}
+			if s.attrURLs(a.Val) {
+				s.drop("attr:" + key + ":url")
+				continue
+			}
 		}
 		kept = append(kept, a)
 	}
@@ -529,6 +538,28 @@ func (s *sanitizer) attrs(n *html.Node, tag string) {
 		s.generated[bgPlaceholder] = true
 		n.InsertBefore(bgPlaceholder, n.FirstChild)
 	}
+}
+
+// attrURLs records the url() references in an attribute value (SVG
+// presentation attributes such as fill, filter and mask take them) and
+// reports whether any points outside the document; "url(#id)" is kept.
+func (s *sanitizer) attrURLs(v string) bool {
+	if !strings.Contains(strings.ToLower(v), "url(") {
+		return false
+	}
+	external := false
+	for _, m := range cssURL.FindAllStringSubmatch(v, -1) {
+		u := strings.TrimSpace(firstNonEmpty(m[1], m[2], m[3]))
+		if strings.HasPrefix(u, "#") {
+			continue
+		}
+		external = true
+		s.cssRef(u)
+	}
+	if strings.Count(strings.ToLower(v), "url(") != len(cssURL.FindAllStringIndex(v, -1)) {
+		external = true // an url( the pattern did not parse: drop it
+	}
+	return external
 }
 
 // href handles a link target. It returns false when the attribute is removed.
