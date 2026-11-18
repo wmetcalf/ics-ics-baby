@@ -265,3 +265,30 @@ func TestFileURLSlashPathPOSIX(t *testing.T) {
 		t.Fatalf("Windows: %q", got)
 	}
 }
+
+// The throwaway profile is created next to the PNG and removed afterwards.
+func TestChromiumProfileBesideOutput(t *testing.T) {
+	requireChromium(t)
+	dir, htmlPath := writeHTML(t, "<p>x</p>")
+	out := filepath.Join(dir, "out")
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	orig := chromiumAfterLoadHook
+	seen := false
+	chromiumAfterLoadHook = func() error {
+		m, _ := filepath.Glob(filepath.Join(out, ".ics-ics-baby-chromium-*"))
+		seen = len(m) == 1
+		return nil
+	}
+	defer func() { chromiumAfterLoadHook = orig }()
+	if _, err := RenderHTMLWithChromium(htmlPath, filepath.Join(out, "x.png"), 400, ChromiumSettings{}); err != nil {
+		t.Fatal(err)
+	}
+	if !seen {
+		t.Fatal("profile not created beside the output")
+	}
+	if m, _ := filepath.Glob(filepath.Join(out, ".ics-ics-baby-chromium-*")); len(m) != 0 {
+		t.Fatalf("profile left behind: %v", m)
+	}
+}

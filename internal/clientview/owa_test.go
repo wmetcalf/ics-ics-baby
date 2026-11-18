@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"ics-ics-baby/internal/icsparse"
 )
@@ -377,5 +378,27 @@ func TestOWAAltDescParts(t *testing.T) {
 		"X-ALT-DESC;FMTTYPE=text/html:<p>Later text</p>\r\n")))
 	if !strings.Contains(html, "Later text") || len(sc.RemoteRefs) != 1 || sc.RemoteRefs[0].Host != "track.example" {
 		t.Fatalf("earlier part evidence lost: refs %+v", sc.RemoteRefs)
+	}
+}
+
+// The view build is bounded in time: a sanitizer that never finishes gives
+// a render_failed sidecar and a failure page, not a hung run.
+func TestWriteOWABudgeted(t *testing.T) {
+	orig := owaSanitize
+	block := make(chan struct{})
+	owaSanitize = func(string, string) (SanitizeResult, error) { <-block; return SanitizeResult{}, nil }
+	defer func() { owaSanitize = orig; close(block); abandoned.Store(false) }()
+	cal := parseICS(t, invite("REQUEST", `X-ALT-DESC;FMTTYPE=text/html:<p>x</p>`))
+	dir := t.TempDir()
+	start := time.Now()
+	sc, err := WriteOWABudgeted(cal, "abc", dir, 200*time.Millisecond, 0)
+	if err == nil || sc.Status != "render_failed" || !contains(sc.Dropped, "build_budget_exceeded") {
+		t.Fatalf("sc %+v err %v", sc, err)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatal("budget not enforced")
+	}
+	if b, rerr := os.ReadFile(filepath.Join(dir, OWAHTMLName)); rerr != nil || !strings.Contains(string(b), "longer than") {
+		t.Fatalf("failure page: %v %s", rerr, b)
 	}
 }

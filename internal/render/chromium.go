@@ -118,7 +118,9 @@ func renderChromium(htmlPath, pngPath string, width int, opts ChromiumSettings) 
 		return nil, false, fmt.Errorf("create screenshot dir: %w", err)
 	}
 
-	profileDir, err := os.MkdirTemp("", "ics-ics-baby-chromium-")
+	// The profile lives next to the output (not in the system temp dir), so
+	// a run killed mid-render leaves it where the caller cleans up.
+	profileDir, err := os.MkdirTemp(filepath.Dir(pngPath), ".ics-ics-baby-chromium-")
 	if err != nil {
 		return nil, false, fmt.Errorf("create chromium profile dir: %w", err)
 	}

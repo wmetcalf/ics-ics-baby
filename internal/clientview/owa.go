@@ -449,6 +449,10 @@ func eventEvidence(ev *icsparse.EventInfo, outDir string) (EventEvidence, error)
 }
 
 func writeView(outDir string, view owaView) error {
+	if abandoned.Load() && !view.Failed {
+		// WriteOWABudgeted gave up on this build and wrote a failure page.
+		return fmt.Errorf("view build abandoned")
+	}
 	var buf bytes.Buffer
 	if err := owaTemplate.Execute(&buf, view); err != nil {
 		// Last resort: a static page naming the failure.

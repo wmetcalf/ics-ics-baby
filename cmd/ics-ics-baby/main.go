@@ -96,6 +96,7 @@ func main() {
 	var findingsJSON bool
 	var maxAttachments int
 	var listFindingCodes bool
+	var owaBuildTimeout time.Duration
 
 	flag.StringVar(&outDir, "out", "out", "Output directory")
 	flag.StringVar(&screenshot, "screenshot", "", "Output PNG path (default: OUT/preview.png)")
@@ -122,6 +123,7 @@ func main() {
 	flag.DurationVar(&chromiumTimeout, "chromium-timeout", 45*time.Second, "Timeout for each headless Chromium render")
 	flag.BoolVar(&chromiumNoSandbox, "chromium-no-sandbox", false, "Disable the Chromium sandbox (only for containers that cannot provide it)")
 	flag.IntVar(&chromiumMaxHeight, "chromium-max-height", 20000, "Maximum Chromium capture height in pixels")
+	flag.DurationVar(&owaBuildTimeout, "owa-build-timeout", 30*time.Second, "Time limit for building the --invite-view page (sanitizing the bodies), before Chromium renders it")
 	flag.StringVar(&inviteView, "invite-view", "", "Also write an emulated client view of the invite: owa (rendered with headless Chromium)")
 	flag.BoolVar(&findingsJSON, "findings-json", false, "Also write stable-coded findings to OUT/ics-ics-baby-findings.json")
 	flag.BoolVar(&hideSecurityAlerts, "hide-security-alerts", false, "Hide security alert warnings in HTML/PNG output (default: show alerts)")
@@ -170,6 +172,7 @@ func main() {
 		fmt.Println("  --list-finding-codes            Print every finding code and severity as JSON and exit")
 		fmt.Println("  --findings-json                 Also write stable-coded findings (ics-ics-baby-findings.json)")
 		fmt.Println("  --invite-view owa               Also write an emulated Outlook-on-the-web view (HTML, sidecar JSON, PNG via Chromium)")
+		fmt.Println("  --owa-build-timeout DURATION    Time limit for building that view before rendering (default: 30s)")
 		fmt.Println("\nScreenshot engine options:")
 		fmt.Println("  --screenshot-engine go|wkhtml|chromium  PNG renderer (default: go)")
 		fmt.Println("  --wkhtml-bin PATH               Path to wkhtmltoimage binary (default: wkhtmltoimage)")
@@ -376,7 +379,7 @@ func main() {
 	owaFailed := false
 	var owaWritten []string
 	if inviteView == "owa" {
-		owaFailed, owaWritten = writeOWAView(cal, inputSHA, outDir, width, chromiumOpts)
+		owaFailed, owaWritten = writeOWAView(cal, inputSHA, outDir, width, chromiumOpts, owaBuildTimeout)
 	}
 
 	fmt.Println("Wrote manifest:", manifestPath)
@@ -398,7 +401,10 @@ func main() {
 // writeOWAView writes the OWA HTML, renders its PNG with Chromium and then
 // writes the sidecar, which records the render outcome. It returns whether a
 // requested step failed and the "Wrote ..." lines for files that exist.
-func writeOWAView(cal *icsparse.CalendarInfo, inputSHA, outDir string, width int, opts render.ChromiumSettings) (failed bool, wrote []string) {
+// owaBuildMaxHeap bounds the Go heap while building the OWA view.
+const owaBuildMaxHeap = 2 << 30
+
+func writeOWAView(cal *icsparse.CalendarInfo, inputSHA, outDir string, width int, opts render.ChromiumSettings, buildTimeout time.Duration) (failed bool, wrote []string) {
 	htmlPath := filepath.Join(outDir, clientview.OWAHTMLName)
 	sidecarPath := filepath.Join(outDir, clientview.OWASidecarName)
 	pngPath := filepath.Join(outDir, clientview.OWAPNGName)
@@ -411,7 +417,7 @@ func writeOWAView(cal *icsparse.CalendarInfo, inputSHA, outDir string, width int
 		}
 	}
 
-	sc, err := clientview.WriteOWA(cal, inputSHA, outDir)
+	sc, err := clientview.WriteOWABudgeted(cal, inputSHA, outDir, buildTimeout, owaBuildMaxHeap)
 	htmlOK := err == nil
 	if err != nil {
 		sc.Status = "render_failed"

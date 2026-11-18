@@ -66,6 +66,8 @@ const (
 	maxInlinePixelsTotal = 64 << 20 // decoded pixels of all inline images of a body
 	maxMergedText        = 32 << 20 // bytes copied merging adjacent text in the parser
 	maxStackScan         = 32 << 20 // open-stack entries the parser's scope checks walk
+	maxRebuiltAttrs      = 4 << 20  // attributes copied into re-created formatting elements
+	maxRebuiltBytes      = 64 << 20 // bytes of those attributes
 	maxInlineImages      = 1000     // data: image files written per body
 	depthHeadroom        = 32       // parser stack used by html/context/implied elements
 	outputSlack          = 4096
@@ -156,6 +158,56 @@ var tableParts = map[string]bool{
 var formattingMarkers = map[string]bool{
 	"applet": true, "object": true, "marquee": true, "template": true,
 	"td": true, "th": true, "caption": true,
+}
+
+// tableStructure elements hold no text: text there is foster-parented.
+var tableStructure = map[string]bool{
+	"table": true, "tbody": true, "thead": true, "tfoot": true, "tr": true, "col": true, "colgroup": true,
+}
+
+// tableEnd end tags close through cells and rows up to their table.
+var tableEnd = map[string]bool{
+	"table": true, "tbody": true, "thead": true, "tfoot": true, "tr": true, "td": true, "th": true, "caption": true,
+}
+
+// tableScope and buttonScope stop the search for an element to close.
+var tableScope = map[string]bool{"table": true, "html": true, "template": true}
+var buttonScope = map[string]bool{
+	"applet": true, "caption": true, "html": true, "table": true, "td": true, "th": true,
+	"marquee": true, "object": true, "template": true, "button": true,
+	"svg": true, "math": true, "foreignobject": true, "desc": true, "title": true,
+	"mi": true, "mo": true, "mn": true, "ms": true, "mtext": true, "annotation-xml": true,
+}
+
+// closesP start tags close an open <p> (in button scope).
+var closesP = map[string]bool{
+	"address": true, "article": true, "aside": true, "blockquote": true, "center": true,
+	"details": true, "dialog": true, "dir": true, "div": true, "dl": true, "fieldset": true,
+	"figcaption": true, "figure": true, "footer": true, "header": true, "hgroup": true,
+	"main": true, "menu": true, "nav": true, "ol": true, "p": true, "search": true,
+	"section": true, "summary": true, "ul": true, "h1": true, "h2": true, "h3": true,
+	"h4": true, "h5": true, "h6": true, "pre": true, "listing": true, "form": true,
+	"hr": true, "xmp": true, "plaintext": true, "li": true, "dd": true, "dt": true,
+}
+
+// specialElements are the parser's "special" category.
+var specialElements = map[string]bool{
+	"address": true, "applet": true, "area": true, "article": true, "aside": true, "base": true,
+	"basefont": true, "bgsound": true, "blockquote": true, "body": true, "br": true, "button": true,
+	"caption": true, "center": true, "col": true, "colgroup": true, "dd": true, "details": true,
+	"dir": true, "div": true, "dl": true, "dt": true, "embed": true, "fieldset": true,
+	"figcaption": true, "figure": true, "footer": true, "form": true, "frame": true,
+	"frameset": true, "h1": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true,
+	"head": true, "header": true, "hgroup": true, "hr": true, "html": true, "iframe": true,
+	"img": true, "input": true, "keygen": true, "li": true, "link": true, "listing": true,
+	"main": true, "marquee": true, "menu": true, "meta": true, "nav": true, "noembed": true,
+	"noframes": true, "noscript": true, "object": true, "ol": true, "p": true, "param": true,
+	"plaintext": true, "pre": true, "script": true, "search": true, "section": true,
+	"select": true, "source": true, "style": true, "summary": true, "table": true,
+	"tbody": true, "td": true, "template": true, "textarea": true, "tfoot": true, "th": true,
+	"thead": true, "title": true, "tr": true, "track": true, "ul": true, "wbr": true, "xmp": true,
+	"mi": true, "mo": true, "mn": true, "ms": true, "mtext": true, "annotation-xml": true,
+	"foreignobject": true, "desc": true,
 }
 
 // ignoredInBody start tags are dropped by the parser outside a table (or
@@ -493,6 +545,9 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 	//    outside a table is ignored by the parser, which then keeps them.
 	var stack, active []string
 	onStack, nFmt, tables, foreignOpen := 0, 0, 0, 0
+	// Each re-created element copies its attributes (and walk re-sanitizes
+	// them): charge attribute counts and bytes of the active entries too.
+	activeAttrs, activeBytes := 0, 0
 	depth := func() int {
 		extra := nFmt - onStack
 		if extra < 0 {
@@ -522,7 +577,31 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 			foreignOpen++
 		}
 	}
+	clearToMarker := func() { // the parser does this when a cell/marquee/... closes
+		for j := len(active) - 1; j >= 0; j-- {
+			if active[j][0] == '|' {
+				for _, a := range active[j+1:] {
+					nFmt--
+					activeAttrs -= strings.Count(a, "\x00")
+					activeBytes -= len(a)
+				}
+				active = active[:j]
+				return
+			}
+		}
+	}
 	pop := func(i int) { // close stack[i:]
+		for k := len(stack) - 1; k >= i; k-- {
+			if formattingMarkers[stack[k]] {
+				clearToMarker()
+				for j := len(active) - 1; j >= 0; j-- { // and the marker
+					if active[j] == "|"+stack[k] {
+						active = append(active[:j], active[j+1:]...)
+						break
+					}
+				}
+			}
+		}
 		for _, t := range stack[i:] {
 			switch {
 			case formattingElements[t]:
@@ -537,6 +616,26 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 	}
 	off := 0
 	rebuilt, scanned := 0, 0
+	rebuiltAttrs, rebuiltBytes := 0, 0
+	keyAttrs := func(key string) int { return strings.Count(key, "\x00") }
+	tableCtx := func() bool { // text here is foster-parented before the table
+		return tables > 0 && len(stack) > 0 && tableStructure[stack[len(stack)-1]]
+	}
+	// closeTo pops to (and including) the nearest open element in names,
+	// unless an element in stops (or a special one, when special) comes
+	// first: the parser's implied end tags for li, dd/dt, p, cells, rows.
+	closeTo := func(names map[string]bool, stops map[string]bool, special bool) {
+		for i := len(stack) - 1; i >= 0; i-- {
+			t := stack[i]
+			if names[t] {
+				pop(i)
+				return
+			}
+			if stops[t] || (special && specialElements[t] && t != "address" && t != "div" && t != "p") {
+				return
+			}
+		}
+	}
 	// The parser appends each text token to an adjacent text node
 	// (n.Data += text) when only ignored tags separate them: "a</x>" or
 	// "a<tr>" (outside a table) x 400k copies quadratically. Track the
@@ -561,18 +660,24 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 		}
 		if tt == html.StartTagToken || tt == html.SelfClosingTagToken || tt == html.TextToken || tt == html.EndTagToken {
 			rebuilt += nFmt
+			rebuiltAttrs += activeAttrs
+			rebuiltBytes += activeBytes
 			if tt != html.TextToken {
 				// The parser scans the open stack for scope on most tags
-				// (<hr>, </p>, </li>, ...): charge its depth.
-				scanned += len(stack)
+				// (<hr>, </p>, </li>, ...) and the active list on others:
+				// charge both.
+				scanned += len(stack) + len(active)
 			}
-			if rebuilt > maxRebuiltNodes || scanned > maxStackScan || depth() > max {
+			if rebuilt > maxRebuiltNodes || rebuiltAttrs > maxRebuiltAttrs || rebuiltBytes > maxRebuiltBytes ||
+				scanned > maxStackScan || depth() > max {
 				return off, true
 			}
 		}
 		switch tt {
 		case html.CommentToken:
-			merging = false
+			if !tableCtx() {
+				merging = false
+			}
 		case html.StartTagToken, html.SelfClosingTagToken:
 			name, hasAttr := z.TagName()
 			tag := string(name)
@@ -596,7 +701,13 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 				// as markup there too, which only over-counts).
 				z.NextIsNotRawText()
 			}
-			if !ignoredInBody[tag] || tables > 0 {
+			if tableCtx() {
+				// Text before and after a row/section start tag is foster-
+				// parented into one text node before the table.
+				if !tableStructure[tag] {
+					merging = false
+				}
+			} else if !ignoredInBody[tag] || tables > 0 {
 				merging = false
 			}
 			inForeignContent := foreign()
@@ -613,11 +724,37 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 			if tt == html.SelfClosingTagToken && (inForeignContent || tag == "svg" || tag == "math") {
 				break // closed at once
 			}
+			if ignoredInBody[tag] && tables == 0 {
+				break // outside a table the parser ignores the tag
+			}
 			if formattingMarkers[tag] {
 				active = append(active, "|"+tag)
 			}
-			if voidElements[tag] || (!strict && optionalEndTags[tag]) {
+			if voidElements[tag] {
 				break
+			}
+			// Implied end tags, so elements left open inside a closed item,
+			// paragraph or cell do not stay on the modeled stack.
+			switch {
+			case tag == "li":
+				closeTo(map[string]bool{"li": true}, nil, true)
+			case tag == "dd" || tag == "dt":
+				closeTo(map[string]bool{"dd": true, "dt": true}, nil, true)
+			case tag == "td" || tag == "th":
+				closeTo(map[string]bool{"caption": true}, tableScope, false)
+				closeTo(map[string]bool{"td": true, "th": true}, tableScope, false)
+			case tag == "tr":
+				closeTo(map[string]bool{"caption": true, "td": true, "th": true}, tableScope, false)
+				closeTo(map[string]bool{"tr": true}, tableScope, false)
+			case tag == "tbody" || tag == "thead" || tag == "tfoot" || tag == "colgroup" || tag == "caption":
+				closeTo(map[string]bool{"caption": true, "td": true, "th": true}, tableScope, false)
+				closeTo(map[string]bool{"tr": true}, tableScope, false)
+				closeTo(map[string]bool{"tbody": true, "thead": true, "tfoot": true}, tableScope, false)
+			case tag == "option":
+				closeTo(map[string]bool{"option": true}, tableScope, false)
+			}
+			if closesP[tag] {
+				closeTo(map[string]bool{"p": true}, buttonScope, false)
 			}
 			push(tag)
 			if formattingElements[tag] {
@@ -630,11 +767,15 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 					}
 				}
 				if same >= 3 {
+					activeAttrs -= keyAttrs(active[first])
+					activeBytes -= len(active[first])
 					active = append(active[:first], active[first+1:]...)
 					nFmt--
 				}
 				active = append(active, key)
 				nFmt++
+				activeAttrs += keyAttrs(key)
+				activeBytes += len(key)
 			}
 			if depth() > max {
 				return off, true
@@ -646,30 +787,41 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 				// Only back to the last scope marker, as the parser does.
 				for i := len(active) - 1; i >= 0 && active[i][0] != '|'; i-- {
 					if strings.HasPrefix(active[i], tag+"\x00") {
+						activeAttrs -= keyAttrs(active[i])
+						activeBytes -= len(active[i])
 						active = append(active[:i], active[i+1:]...)
 						nFmt--
 						break
 					}
 				}
 			}
-			if formattingMarkers[tag] {
-				for i := len(active) - 1; i >= 0; i-- {
-					if active[i] == "|"+tag {
-						active = append(active[:i], active[i+1:]...)
-						break
-					}
-				}
-			}
-			if tables > 0 && ignoredInBody[tag] {
+			foster := tableCtx() && tableStructure[tag]
+			if tables > 0 && ignoredInBody[tag] && !foster {
 				merging = false
 			}
-			if voidElements[tag] || (!strict && optionalEndTags[tag]) {
+			if voidElements[tag] {
 				break
 			}
+			// An end tag closes its element only when it is reachable: an
+			// inline one ("any other end tag") stops at any special element,
+			// a special one at a scope boundary.
 			for i := len(stack) - 1; i >= 0; i-- {
 				if stack[i] == tag {
 					pop(i)
-					merging = false
+					if !foster {
+						merging = false
+					}
+					break
+				}
+				switch {
+				case tableEnd[tag]:
+					if stack[i] == "html" || stack[i] == "template" || (tag != "table" && stack[i] == "table") {
+						i = -1
+					}
+				case !specialElements[tag] && specialElements[stack[i]], buttonScope[stack[i]]:
+					i = -1
+				}
+				if i < 0 {
 					break
 				}
 			}
@@ -785,6 +937,13 @@ func (s *sanitizer) walk(root *html.Node) {
 			continue
 		}
 		tag := strings.ToLower(n.Data)
+		if n.Namespace == "svg" && (tag == "filter" || strings.HasPrefix(tag, "fe")) {
+			// SVG filter primitives paint in software and can take tens of
+			// seconds (feMorphology radius=400 on nested groups).
+			n.Parent.RemoveChild(n)
+			s.drop("element:filter")
+			continue
+		}
 		if n.Namespace != "" && (foreignDropped[tag] || renderVoid[tag]) {
 			// (a void HTML name with children cannot be serialized)
 			n.Parent.RemoveChild(n)
@@ -1112,6 +1271,10 @@ func (s *sanitizer) attrs(n *html.Node, tag string) {
 		default:
 			if scriptScheme(a.Val) {
 				s.drop("attr:" + key + ":" + schemeOf(a.Val))
+				continue
+			}
+			if n.Namespace != "" && key == "filter" {
+				s.drop("attr:filter") // see element:filter
 				continue
 			}
 			if n.Namespace != "" && strings.Contains(a.Val, `\`) {

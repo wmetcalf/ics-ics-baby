@@ -879,3 +879,63 @@ func TestStackScanCostBounded(t *testing.T) {
 		t.Fatalf("took %v", d)
 	}
 }
+
+// Round-5 prosecution cases.
+func TestSanitizeRound5Prosecution(t *testing.T) {
+	timed := func(t *testing.T, in string) SanitizeResult {
+		t.Helper()
+		start := time.Now()
+		res, err := OWASanitize(in, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d := time.Since(start); d > 3*time.Second {
+			t.Fatalf("took %v", d)
+		}
+		return res
+	}
+	t.Run("marker end tags", func(t *testing.T) {
+		timed(t, strings.Repeat("<td>", 100000)+strings.Repeat("</th>", 20000))
+	})
+	t.Run("foster-parented text merges", func(t *testing.T) {
+		timed(t, "<table>"+strings.Repeat("xxxx<tr>", 100000))
+		timed(t, "<table>"+strings.Repeat("xxxx<!---->", 70000))
+	})
+	t.Run("attribute-heavy clones", func(t *testing.T) {
+		var a strings.Builder
+		for k := 0; k < 400; k++ {
+			a.WriteString(" a" + strconv.Itoa(k))
+		}
+		in := "<p><b" + a.String() + "><i" + a.String() + "><u" + a.String() + "><s" + a.String() + "></p>" + strings.Repeat("<p>x</p>", 20000)
+		res := timed(t, in)
+		if !contains(res.Dropped, "input_truncated") {
+			t.Fatalf("dropped %v", res.Dropped)
+		}
+	})
+	t.Run("svg filters dropped", func(t *testing.T) {
+		res := timed(t, `<svg><defs><filter id=f><feMorphology operator=dilate radius=400 /></filter></defs><g filter="url(#f)"><rect width=10 height=10 /></g></svg>`)
+		if strings.Contains(strings.ToLower(res.HTML), "filter") || strings.Contains(strings.ToLower(res.HTML), "femorphology") {
+			t.Fatalf("%s", res.HTML)
+		}
+	})
+	t.Run("unclosed inline in cells and items keeps the tail", func(t *testing.T) {
+		var b strings.Builder
+		b.WriteString("<table>")
+		for r := 0; r < 130; r++ {
+			b.WriteString("<tr>")
+			for c := 0; c < 4; c++ {
+				b.WriteString("<td><font face=Arial>r" + strconv.Itoa(r) + "</td>")
+			}
+			b.WriteString("</tr>")
+		}
+		b.WriteString(`</table><p><a href="https://after.example.com/doc">doc</a></p>`)
+		res := timed(t, b.String())
+		if len(res.Links) != 1 {
+			t.Fatalf("tail lost: dropped %v", res.Dropped)
+		}
+		res = timed(t, "<ul>"+strings.Repeat("<li><span style=color:#333>Item</li>", 600)+`</ul><p><a href="https://after.example.com/doc">doc</a></p>`)
+		if len(res.Links) != 1 {
+			t.Fatalf("list tail lost: dropped %v", res.Dropped)
+		}
+	})
+}
