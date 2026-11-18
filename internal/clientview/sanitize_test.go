@@ -1,11 +1,14 @@
 package clientview
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -231,6 +234,18 @@ func TestSanitizeNestedTables(t *testing.T) {
 	}
 }
 
+// tinyPNG is a valid, distinct 1x1 PNG for each i.
+func tinyPNG(t *testing.T, i int) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	img.Pix[0], img.Pix[1], img.Pix[2], img.Pix[3] = byte(i), byte(i>>8), byte(i>>16), 255
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
 func contains(list []string, s string) bool {
 	for _, v := range list {
 		if v == s {
@@ -389,9 +404,7 @@ func TestInlineImageFilesCapped(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "ics-ics-baby-inline")
 	var b strings.Builder
 	for i := 0; i < maxInlineImages+50; i++ {
-		// distinct payloads: a GIF header followed by a counter
-		data := []byte("GIF89a" + strings.Repeat("x", 4) + string(rune('a'+i%26)) + strings.Repeat("y", i/26))
-		b.WriteString(`<img src="data:image/gif;base64,` + base64.StdEncoding.EncodeToString(data) + `">`)
+		b.WriteString(`<img src="data:image/png;base64,` + base64.StdEncoding.EncodeToString(tinyPNG(t, i)) + `">`)
 	}
 	res, err := OWASanitize(b.String(), dir)
 	if err != nil {
@@ -533,8 +546,7 @@ func TestInlineImageCapSharedAcrossBodies(t *testing.T) {
 	for body := 0; body < 3; body++ {
 		var b strings.Builder
 		for i := 0; i < maxInlineImages/2+10; i++ {
-			data := []byte("GIF89a" + strconv.Itoa(body) + "-" + strconv.Itoa(i))
-			b.WriteString(`<img src="data:image/gif;base64,` + base64.StdEncoding.EncodeToString(data) + `">`)
+			b.WriteString(`<img src="data:image/png;base64,` + base64.StdEncoding.EncodeToString(tinyPNG(t, body*100000+i)) + `">`)
 		}
 		if _, err := OWASanitize(b.String(), dir); err != nil {
 			t.Fatal(err)
@@ -542,8 +554,8 @@ func TestInlineImageCapSharedAcrossBodies(t *testing.T) {
 		n++
 	}
 	ents, _ := os.ReadDir(dir)
-	if len(ents) > maxInlineImages {
-		t.Fatalf("%d bodies wrote %d inline files, cap %d", n, len(ents), maxInlineImages)
+	if len(ents) != maxInlineImages {
+		t.Fatalf("%d bodies wrote %d inline files, want the cap %d", n, len(ents), maxInlineImages)
 	}
 }
 
@@ -736,4 +748,46 @@ func TestTokenEvidence(t *testing.T) {
 	if len(s.links) != 1 || s.links[0].Host != "evil.example" || len(s.refs) != 2 {
 		t.Fatalf("links %v refs %v", s.links, s.refs)
 	}
+}
+
+// Round-5 review cases.
+func TestSanitizeRound5(t *testing.T) {
+	san := func(t *testing.T, in string) SanitizeResult {
+		t.Helper()
+		res, err := OWASanitize(in, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	t.Run("phantom body in foreign html dropped", func(t *testing.T) {
+		res := san(t, `<object><svg><html><foreignObject><table></table><head></head></foreignObject></html></svg><table></table></object><li><div><div><div><svg width="0" height="0"><html><foreignObject><table></table></foreignObject></html></svg><body style="margin-top:-386px"><li>A</li></body></div></div></div></li>`)
+		if strings.Contains(res.HTML, "<body") || strings.Contains(res.HTML, "<html") {
+			t.Fatalf("phantom elements kept: %s", res.HTML)
+		}
+	})
+	t.Run("foreign void-named element with children", func(t *testing.T) {
+		res := san(t, `<p>keep</p><svg><track>x</track></svg>`)
+		if !strings.Contains(res.HTML, "keep") {
+			t.Fatalf("%s / %v", res.HTML, res.Dropped)
+		}
+	})
+	t.Run("pixel bomb inline image rejected", func(t *testing.T) {
+		var buf bytes.Buffer
+		img := image.NewGray(image.Rect(0, 0, 9000, 9000))
+		if err := png.Encode(&buf, img); err != nil {
+			t.Fatal(err)
+		}
+		res := san(t, `<img src="data:image/png;base64,`+base64.StdEncoding.EncodeToString(buf.Bytes())+`" width=200 height=200>`)
+		if strings.Contains(res.HTML, "data:image/png") || !contains(res.Dropped, "data_image_too_many_pixels") {
+			t.Fatalf("dropped %v", res.Dropped)
+		}
+	})
+	t.Run("quadratic text merging bounded", func(t *testing.T) {
+		start := time.Now()
+		san(t, strings.Repeat("a</x>", 400000)+strings.Repeat("<table><td>", 300))
+		if d := time.Since(start); d > 3*time.Second {
+			t.Fatalf("took %v", d)
+		}
+	})
 }

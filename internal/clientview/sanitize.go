@@ -8,7 +8,10 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"fmt"
+	"image"
+	_ "image/gif" // DecodeConfig for inline images
+	_ "image/jpeg"
+	_ "image/png"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -17,6 +20,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	_ "golang.org/x/image/bmp"
+	_ "golang.org/x/image/webp"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
 )
@@ -49,17 +54,20 @@ type SanitizeResult struct {
 }
 
 const (
-	maxSanitizeInput    = 2 << 20 // bytes of HTML considered
-	maxSanitizeDepth    = 512     // element nesting kept
-	maxInlineImageBytes = 2 << 20 // decoded bytes per data: image
-	maxRecorded         = 1000    // remote refs / links recorded
-	maxLabel            = 120     // characters of a value shown in a placeholder
-	maxLinkText         = 200
-	maxCSSNesting       = 16      // nested @media/@supports kept
-	maxRebuiltNodes     = 1000000 // formatting elements the parser may re-create
-	maxInlineImages     = 1000    // data: image files written per body
-	depthHeadroom       = 32      // parser stack used by html/context/implied elements
-	outputSlack         = 4096
+	maxSanitizeInput     = 2 << 20 // bytes of HTML considered
+	maxSanitizeDepth     = 512     // element nesting kept
+	maxInlineImageBytes  = 2 << 20 // decoded bytes per data: image
+	maxRecorded          = 1000    // remote refs / links recorded
+	maxLabel             = 120     // characters of a value shown in a placeholder
+	maxLinkText          = 200
+	maxCSSNesting        = 16       // nested @media/@supports kept
+	maxRebuiltNodes      = 1000000  // formatting elements the parser may re-create
+	maxInlinePixels      = 16 << 20 // decoded pixels per inline image (e.g. 4096x4096)
+	maxInlinePixelsTotal = 64 << 20 // decoded pixels of all inline images of a body
+	maxMergedText        = 32 << 20 // bytes copied merging adjacent text in the parser
+	maxInlineImages      = 1000     // data: image files written per body
+	depthHeadroom        = 32       // parser stack used by html/context/implied elements
+	outputSlack          = 4096
 )
 
 // ---------------------------------------------------------------------------
@@ -80,6 +88,26 @@ var droppedElements = map[string]bool{
 	"handler": true, "listener": true,
 	// <use> chains fan out exponentially in the renderer.
 	"use": true,
+	// Document-level elements only occur as parser artifacts (e.g. inside
+	// svg/math, where x/net/html and Chromium disagree on insertion modes);
+	// Chromium merges a stray <body>/<html>'s attributes onto the page.
+	"html": true, "head": true, "body": true,
+}
+
+// renderVoid are the names html.Render refuses to write with children.
+var renderVoid = map[string]bool{
+	"area": true, "base": true, "br": true, "col": true, "embed": true, "hr": true, "img": true,
+	"input": true, "keygen": true, "link": true, "meta": true, "param": true, "source": true,
+	"track": true, "wbr": true,
+}
+
+// foreignDropped are names that must not appear on svg/math elements:
+// x/net/html resets its insertion mode on them without checking the
+// namespace, so its tree (the stability oracle) would diverge from
+// Chromium's.
+var foreignDropped = map[string]bool{
+	"td": true, "th": true, "tr": true, "tbody": true, "thead": true, "tfoot": true,
+	"caption": true, "colgroup": true, "table": true, "select": true,
 }
 
 // unwrappedElements lose their tag but keep their content (OWA strips the
@@ -147,18 +175,19 @@ var voidElements = map[string]bool{
 }
 
 type sanitizer struct {
-	inlineDir   string
-	refs        []RemoteRef
-	generated   map[*html.Node]bool // placeholders/labels we inserted
-	refSeen     map[string]bool
-	links       []Link
-	linkSeen    map[string]bool
-	dropped     []string
-	droppedSeen map[string]bool
-	capped      bool
-	inlineSeen  map[string]bool // inline image files written
-	inlineFiles int             // files in inlineDir, this body's included
-	styles      []*html.Node    // sanitized <style> elements, in order
+	inlineDir    string
+	refs         []RemoteRef
+	generated    map[*html.Node]bool // placeholders/labels we inserted
+	refSeen      map[string]bool
+	links        []Link
+	linkSeen     map[string]bool
+	dropped      []string
+	droppedSeen  map[string]bool
+	capped       bool
+	inlineSeen   map[string]bool // inline image files written
+	inlineFiles  int             // files in inlineDir, this body's included
+	inlinePixels int64           // decoded pixels of the kept inline images
+	styles       []*html.Node    // sanitized <style> elements, in order
 }
 
 func newSanitizer(inlineDir string) *sanitizer {
@@ -271,7 +300,10 @@ func OWASanitize(raw string, inlineDir string) (SanitizeResult, error) {
 	var buf bytes.Buffer
 	for c := root.FirstChild; c != nil; c = c.NextSibling {
 		if err := html.Render(&buf, c); err != nil {
-			return SanitizeResult{}, fmt.Errorf("render body: %w", err)
+			// Never fail the whole view over one body.
+			s.drop("render_failed")
+			s.tokenEvidence(raw)
+			return SanitizeResult{HTML: unrenderedBody, RemoteRefs: s.refs, Links: s.links, Dropped: s.dropped}, nil
 		}
 	}
 	out := buf.String()
@@ -492,12 +524,30 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 	}
 	off := 0
 	rebuilt := 0
+	// The parser appends each text token to an adjacent text node
+	// (n.Data += text) when only ignored tags separate them: "a</x>" x 400k
+	// copies quadratically. Track the growing node and the bytes copied.
+	merging, mergeLen, merged := false, 0, 0
 	for {
 		tt := z.Next()
 		if tt == html.ErrorToken {
 			return 0, false
 		}
 		n := len(z.Raw())
+		switch tt {
+		case html.TextToken:
+			if merging {
+				merged += mergeLen
+				mergeLen += n
+			} else {
+				merging, mergeLen = true, n
+			}
+			if merged > maxMergedText {
+				return off, true
+			}
+		case html.StartTagToken, html.SelfClosingTagToken, html.CommentToken:
+			merging = false
+		}
 		if tt == html.StartTagToken || tt == html.SelfClosingTagToken || tt == html.TextToken || tt == html.EndTagToken {
 			// (end tags are charged too: closing one scans the active list)
 			rebuilt += len(active)
@@ -581,6 +631,7 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 			for i := len(stack) - 1; i >= 0; i-- {
 				if stack[i] == tag {
 					pop(i)
+					merging = false
 					break
 				}
 			}
@@ -696,6 +747,12 @@ func (s *sanitizer) walk(root *html.Node) {
 			continue
 		}
 		tag := strings.ToLower(n.Data)
+		if n.Namespace != "" && (foreignDropped[tag] || renderVoid[tag]) {
+			// (a void HTML name with children cannot be serialized)
+			n.Parent.RemoveChild(n)
+			s.drop("element:foreign_" + tag)
+			continue
+		}
 		if droppedElements[tag] {
 			n.Parent.RemoveChild(n)
 			s.drop("element:" + tag)
@@ -1161,6 +1218,20 @@ func (s *sanitizer) inlineImage(raw string) (RemoteRef, bool) {
 		s.drop("data_image_too_large")
 		return RemoteRef{}, false
 	}
+	// The renderer decodes the whole bitmap whatever size it is shown at:
+	// a 51 KB 16000x16000 PNG costs ~1 GB. Bound the pixels per image and
+	// per body.
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		s.drop("data_image_malformed")
+		return RemoteRef{}, false
+	}
+	px := int64(cfg.Width) * int64(cfg.Height)
+	if px > maxInlinePixels || s.inlinePixels+px > maxInlinePixelsTotal {
+		s.drop("data_image_too_many_pixels")
+		return RemoteRef{}, false
+	}
+	s.inlinePixels += px
 	sum := sha256.Sum256(data)
 	sha := hex.EncodeToString(sum[:])
 	r := RemoteRef{Kind: "inline_data", Value: "data:" + mime, SHA256: sha, Mime: mime}

@@ -71,9 +71,11 @@ func TestOWAReparseCannotEscapeBody(t *testing.T) {
 	}
 	red := `<div style="position:absolute;top:0;left:0;width:3000px;height:300px;background:#ff0000">X</div>`
 	for name, body := range map[string]string{
-		"html attrs":  `<svg><image href="http://evil.test/x.png"></image><html style="outline:300px solid #ff0000;outline-offset:-300px"></html></svg><p>hello</p>`,
-		"mi breakout": `<li><div><math><image href="cid:x"></image><mi><li></li></mi></math></div></li></div></div></div>` + red,
-		"form unwrap": `<li><div><form><li></li></form></div></li><dd><div><form><dd></dd></form></div></dd><dt><div><form><dt></dt></form></div></dt></div></div></div>` + red,
+		"html attrs":         `<svg><image href="http://evil.test/x.png"></image><html style="outline:300px solid #ff0000;outline-offset:-300px"></html></svg><p>hello</p>`,
+		"mi breakout":        `<li><div><math><image href="cid:x"></image><mi><li></li></mi></math></div></li></div></div></div>` + red,
+		"phantom body":       `<object><svg><html><foreignObject><table></table><head></head></foreignObject></html></svg><table></table></object><li><div><div><div><svg width="0" height="0"><html><foreignObject><table></table></foreignObject></html></svg><body><li>A</li></body></div></div></div></li>` + red,
+		"phantom body attrs": `<div style="height:200px;background:#ff0000"></div><object><svg><html><foreignObject><table></table><head></head></foreignObject></html></svg><table></table></object><svg width="0" height="0"><html><foreignObject><table></table></foreignObject></html></svg><body style="margin-top:-386px">x</body>`,
+		"form unwrap":        `<li><div><form><li></li></form></div></li><dd><div><form><dd></dd></form></div></dd><dt><div><form><dt></dt></form></div></dt></div></div></div>` + red,
 	} {
 		t.Run(name, func(t *testing.T) { assertHeaderClean(t, body) })
 	}

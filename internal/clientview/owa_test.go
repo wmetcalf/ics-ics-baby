@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -344,7 +343,7 @@ func TestOWATrustedChromeAboveBody(t *testing.T) {
 func TestOWARenderedBodyInlineFirst(t *testing.T) {
 	var hidden strings.Builder
 	for i := 0; i < maxInlineImages; i++ {
-		hidden.WriteString(`<img src="data:image/gif\;base64\,` + base64.StdEncoding.EncodeToString([]byte("GIF89a"+strconv.Itoa(i))) + `">`)
+		hidden.WriteString(`<img src="data:image/png\;base64\,` + base64.StdEncoding.EncodeToString(tinyPNG(t, i+1)) + `">`)
 	}
 	ics := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\n" +
 		"BEGIN:VEVENT\r\nUID:one@test\r\nSUMMARY:Shown\r\nX-ALT-DESC;FMTTYPE=text/html:<img src=\"data:image/png\\;base64\\," + onePxPNG + "\">\r\nEND:VEVENT\r\n" +
