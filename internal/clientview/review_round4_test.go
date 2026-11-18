@@ -106,7 +106,7 @@ func TestR4_MergeBudgetBypassedByIgnoredStartTags(t *testing.T) {
 		in := strings.Repeat("a"+sep, (2<<20)/(1+len(sep)))
 		start := time.Now()
 		OWASanitize(in, "")
-		if d := time.Since(start); d > 3*time.Second {
+		if d := time.Since(start); d > 3*raceSlowdown*time.Second {
 			t.Errorf("%q x %d: sanitize took %v", "a"+sep, len(in)/(1+len(sep)), d)
 		}
 	}

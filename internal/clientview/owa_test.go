@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -385,10 +386,21 @@ func TestOWAAltDescParts(t *testing.T) {
 // The view build is bounded in time: a sanitizer that never finishes gives
 // a render_failed sidecar and a failure page, not a hung run.
 func TestWriteOWABudgeted(t *testing.T) {
+	// The stub stays installed for the whole test (and after it, delegating
+	// to the real sanitizer): the abandoned build goroutine reads
+	// owaSanitize concurrently, so it must not be reassigned under it.
 	orig := owaSanitize
 	block := make(chan struct{})
-	owaSanitize = func(string, string) (SanitizeResult, error) { <-block; return SanitizeResult{}, nil }
-	defer func() { owaSanitize = orig; close(block) }()
+	var blocking atomic.Bool
+	blocking.Store(true)
+	owaSanitize = func(raw, dir string) (SanitizeResult, error) {
+		if blocking.Load() {
+			<-block
+			return SanitizeResult{}, nil
+		}
+		return orig(raw, dir)
+	}
+	defer close(block)
 	cal := parseICS(t, invite("REQUEST", `X-ALT-DESC;FMTTYPE=text/html:<p>x</p>`))
 	dir := t.TempDir()
 	start := time.Now()
@@ -403,7 +415,7 @@ func TestWriteOWABudgeted(t *testing.T) {
 		t.Fatalf("failure page: %v %s", rerr, b)
 	}
 	// An abandoned build does not poison the next one.
-	owaSanitize = orig
+	blocking.Store(false)
 	if sc, err := WriteOWABudgeted(cal, "abc", t.TempDir(), 10*time.Second, 0); err != nil || sc.Status != "ok" {
 		t.Fatalf("next build: %+v %v", sc, err)
 	}

@@ -196,7 +196,7 @@ func TestSanitizeCaps(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if d := time.Since(start); d > 2*time.Second {
+		if d := time.Since(start); d > 2*raceSlowdown*time.Second {
 			t.Fatalf("took %v", d)
 		}
 		if len(res.HTML) > maxSanitizeInput {
@@ -213,7 +213,7 @@ func TestSanitizeCaps(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if d := time.Since(start); d > 2*time.Second {
+		if d := time.Since(start); d > 2*raceSlowdown*time.Second {
 			t.Fatalf("took %v", d)
 		}
 		if len(res.HTML) > maxSanitizeInput {
@@ -368,7 +368,7 @@ func TestCSSNestingBounded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d := time.Since(start); d > 5*time.Second {
+	if d := time.Since(start); d > 5*raceSlowdown*time.Second {
 		t.Fatalf("took %v", d)
 	}
 	if !contains(res.Dropped, "css:nesting_limit") {
@@ -521,7 +521,7 @@ func TestFormattingReconstructionBounded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d := time.Since(start); d > 5*time.Second {
+	if d := time.Since(start); d > 5*raceSlowdown*time.Second {
 		t.Fatalf("took %v", d)
 	}
 	if !contains(res.Dropped, "input_truncated") {
@@ -570,7 +570,7 @@ func TestCSSValidateNestedParensLinear(t *testing.T) {
 	if _, err := OWASanitize("<style>"+css+"</style><p>x</p>", ""); err != nil {
 		t.Fatal(err)
 	}
-	if d := time.Since(start); d > 5*time.Second {
+	if d := time.Since(start); d > 5*raceSlowdown*time.Second {
 		t.Fatalf("took %v", d)
 	}
 }
@@ -590,7 +590,7 @@ func TestFormattingReconstructionAfterEnclosingClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d := time.Since(start); d > 3*time.Second { // unbounded: ~10 s
+	if d := time.Since(start); d > 3*raceSlowdown*time.Second { // unbounded: ~10 s
 		t.Fatalf("took %v", d)
 	}
 	if !contains(res.Dropped, "input_truncated") {
@@ -623,7 +623,7 @@ func TestSanitizeRound3(t *testing.T) {
 		b.WriteString(strings.Repeat("<p>x</p>", 60000))
 		start := time.Now()
 		res := san(t, b.String())
-		if d := time.Since(start); d > 5*time.Second {
+		if d := time.Since(start); d > 5*raceSlowdown*time.Second {
 			t.Fatalf("took %v", d)
 		}
 		if !contains(res.Dropped, "input_truncated") {
@@ -790,7 +790,7 @@ func TestSanitizeRound5(t *testing.T) {
 	t.Run("quadratic text merging bounded", func(t *testing.T) {
 		start := time.Now()
 		san(t, strings.Repeat("a</x>", 400000)+strings.Repeat("<table><td>", 300))
-		if d := time.Since(start); d > 3*time.Second {
+		if d := time.Since(start); d > 3*raceSlowdown*time.Second {
 			t.Fatalf("took %v", d)
 		}
 	})
@@ -875,7 +875,7 @@ func TestStackScanCostBounded(t *testing.T) {
 	if _, err := OWASanitize(in, ""); err != nil {
 		t.Fatal(err)
 	}
-	if d := time.Since(start); d > 5*time.Second { // unbounded: ~11 s
+	if d := time.Since(start); d > 5*raceSlowdown*time.Second { // unbounded: ~11 s
 		t.Fatalf("took %v", d)
 	}
 }
@@ -889,7 +889,7 @@ func TestSanitizeRound5Prosecution(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if d := time.Since(start); d > 3*time.Second {
+		if d := time.Since(start); d > 3*raceSlowdown*time.Second {
 			t.Fatalf("took %v", d)
 		}
 		return res
