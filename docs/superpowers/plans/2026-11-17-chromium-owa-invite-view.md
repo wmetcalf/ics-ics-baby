@@ -19,6 +19,7 @@
 - No network request (including DNS) from any render. JavaScript never runs from invite content.
 - No Microsoft logos/trademarks in the OWA view; it is labeled "Emulated Outlook-on-the-web rendering — ics-ics-baby".
 - Manifest JSON schema unchanged (new parser fields are `json:"-"`).
+- The blastbox engine and Loadout adapter (spec section "Blastbox engine output contract") are a separate, optional follow-on plan; nothing in this plan imports or requires them.
 - Tests that need Chromium call `t.Skip` when `render.FindChromium("")` returns an error; `go test ./...` must pass on a machine without Chromium.
 - Chromium defaults: timeout 45s, max capture height 20000 px, sandbox on; `data:` images capped at 2 MiB each.
 
@@ -217,7 +218,31 @@ Pins "behaves as today" before any code changes.
 - [ ] **Step 4: Run** `go test ./...`. Expected: PASS, `TestDefaultOutputsUnchanged` included.
 - [ ] **Step 5: Commit** `feat(cli): --invite-view owa`.
 
-### Task 8: Docs and release check
+### Task 8: Structured findings (`--findings-json`)
+
+**Files:**
+- Create: `internal/icsparse/findings.go`, `internal/icsparse/findings_test.go`
+- Modify: `internal/icsparse/icsparse.go` (every `SuspiciousPatterns`/`InformationalPatterns` append site)
+- Modify: `cmd/ics-ics-baby/main.go`, `cmd/ics-ics-baby/integration_test.go`
+
+**Interfaces:**
+- Produces:
+  - `type Finding struct { Code string \`json:"code"\`; Severity string \`json:"severity"\`; EventUID string \`json:"event_uid,omitempty"\`; Message string \`json:"message"\`; Evidence map[string]string \`json:"evidence,omitempty"\` }`
+  - `EventInfo.Findings []Finding \`json:"-"\``
+  - `func FindingsDoc(cal *CalendarInfo, inputSHA256 string) map[string]any`, which returns `schema_version: "ics-ics-baby-findings/1"`
+  - the flag `--findings-json`, which writes `ics-ics-baby-findings.json`
+
+- [ ] **Step 1: Write failing tests.**
+  - `TestEveryAlertHasCode`: parse all 20 `ics-parser-test-suite/ics_files`. For every event, `len(Findings) == len(SuspiciousPatterns)+len(InformationalPatterns)`, each `Message` equals the corresponding string exactly, and every `Code` comes from the code table.
+  - `TestTeamsHijackFinding`: on a fixture with a non-Teams `X-MICROSOFT-SKYPETEAMSMEETINGURL`, there's a finding with `code:"teams_url_hijack"`, `severity:"high"` and `evidence["url"]` set.
+  - `TestFindingsNotInManifest`: the manifest JSON has no `findings` key.
+  - `TestCLIFindingsJSON`: `--findings-json` writes the file and its `schema_version` is correct. Without the flag, no file is written.
+- [ ] **Step 2: Run** the tests. Expected: FAIL.
+- [ ] **Step 3: Implement.** Add one helper, `addAlert(ev, code, severity, informational bool, evidence map[string]string, format string, args...)`, that appends the existing string to the existing slice and also appends a `Finding`. Replace every append site with it, keeping the message text identical. All codes and severities go in one table in `findings.go`.
+- [ ] **Step 4: Run** `go test ./...`. Expected: PASS, `TestDefaultOutputsUnchanged` included.
+- [ ] **Step 5: Commit** `feat: stable-coded findings via --findings-json`.
+
+### Task 9: Docs and release check
 
 **Files:**
 - Modify: `README.md` (Screenshot Engines section, a new "Outlook-web invite view" section, the flag list)

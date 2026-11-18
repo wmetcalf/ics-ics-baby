@@ -193,6 +193,24 @@ inline       data: images from the raw X-ALT-DESC, written to ics-ics-baby-inlin
              with path, sha256, mime; same 2 MiB cap)
 ```
 
+### 2f. Structured findings for downstream consumers *(added 2026-11-17)*
+
+Today the parser's ~25 alert sites emit free-text strings (`SuspiciousPatterns`,
+`InformationalPatterns`) that a pipeline cannot key on. `--findings-json` (opt-in) writes
+`ics-ics-baby-findings.json`:
+
+```text
+{ "schema_version": "ics-ics-baby-findings/1", "input_sha256": "…",
+  "findings": [ { "code", "severity", "event_uid", "message", "evidence": {…} } ] }
+severity: info | low | medium | high
+```
+
+One stable `code` per alert site (e.g. `teams_url_hijack`, `organizer_sent_by_mismatch`,
+`auto_accept_spoof`, `rsvp_suppressed`, `force_inspector_open`, `fake_attachment_flag`,
+`location_open_redirect`, `high_sequence`, `priority_urgency`, `absolute_alarm`…), kept in one
+table in code. `message` is the exact existing string, so the manifest and HTML are unchanged.
+Severity is the builder's first pass; codes are a contract once shipped.
+
 ### 3. Probe corpus (measurement, not runtime)
 
 `testdata/owa-probes/` — one small ICS per sanitizer rule (tag, attribute, CSS feature). Golden
@@ -205,6 +223,61 @@ that measurement is a later manual step; this change ships the corpus and golden
 - No new flags → identical outputs (golden test on an existing testdata file before/after).
 - `wkhtml` path untouched. `wkhtml-wrap` untouched.
 - Manifest schema unchanged; OWA facts go in the new sidecar.
+
+## Blastbox engine output contract (optional wrapper, separate plan)
+
+The engine is an **optional** wrapper; the CLI never depends on it. It follows the blastbox
+engine seam (`detect` / `warmup` / `detonate`, `blastbox/docs/specs/2026-05-31-detonation-framework-design.md`
+§3–4) and lives beside `email-render` in `msg-mbox-to-eml/src/mail_engines/` (engine name
+`ics-ics-baby`). It runs the binary with `--screenshot-engine chromium --invite-view owa
+--findings-json`, offline, never `--download-attachments`.
+
+**Detection / rejection:** `detect()` accepts input that starts (after BOM/whitespace) with
+`BEGIN:VCALENDAR` or `BEGIN:VCARD`; else `rejected`.
+
+**Declared artifacts** (SDK seals sha256/bytes; ids stable):
+
+```text
+id                 path                                kind
+ics-manifest       ics-ics-baby-manifest.json          file
+ics-findings       ics-ics-baby-findings.json          file
+preview-html       ics-ics-baby-preview.html           file
+preview-png        ics-ics-baby-preview.png            image
+owa-html           ics-ics-baby-owa.html               file   (absent when skipped)
+owa-sidecar        ics-ics-baby-owa.json               file
+owa-png            ics-ics-baby-owa.png                image  (absent when skipped/failed)
+attachment-NNN     ics-ics-baby-attachments/<name>     file
+inline-NNN         ics-ics-baby-inline/<sha>.<ext>     image
+```
+
+**Typed payload** (shared node library, no new node types yet):
+
+```text
+Record "ics-ics-baby/1"  method, calendar_name, prodid, event_count, coverage
+  Page index=0 role=preview  image→preview-png  dims
+  Page index=1 role=owa      image→owa-png      dims   (owa status in Record fields)
+  Record "event"  uid, summary, organizer, sent_by, dtstart, dtend, location, status,
+                  sequence, attendees[], conferences[], join_url, discovered_urls[], alarms[]
+    EmbeddedResource  per attachment  content_type, embedded_path, metadata{source,fmt,href}
+    EmbeddedResource  per inline data: image (content_type, sha via artifact)
+  Record "findings" → ArtifactRef ics-findings (full list stays in the file; top codes inline)
+```
+
+Event field names match `email-render`'s `mail-calendar/1` component fields (uid, summary,
+location, status, sequence, attendees, attachments, recurrence) so Loadout can join the two
+engines' calendar evidence on `(input_sha256, uid)`.
+
+**Loadout mapping** (adapter `backend/loadout/icsbaby.py`, modeled on `boxjs.map_outputs`):
+
+```text
+preview-png / owa-png   → screenshot artifacts (Loadout hashes them: phash/colorhash)
+attachment-* / inline-* → child file artifacts, source_refs=[input], re-identified
+discovered_urls, join_url, links, remote_refs(kind=remote) → url artifacts (not fetched)
+findings                → detections: rule "icsbaby.<code>", severity→risk
+                          (info 0, low 10, medium 35, high 70), evidence=finding.evidence
+owa sidecar             → coverage facts (status, emulation:true, blocked_requests)
+network                 → engine requires the `none` profile; anything else EngineUnavailable
+```
 
 ## Testing
 
