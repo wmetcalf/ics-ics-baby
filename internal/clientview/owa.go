@@ -169,6 +169,10 @@ type owaView struct {
 // body carries data: images) into outDir and returns the sidecar. It does not
 // write the sidecar or render a PNG; the caller does both.
 func WriteOWA(cal *icsparse.CalendarInfo, inputSHA256, outDir string) (Sidecar, error) {
+	return writeOWAGuarded(cal, inputSHA256, outDir, nil)
+}
+
+func writeOWAGuarded(cal *icsparse.CalendarInfo, inputSHA256, outDir string, g *buildGuard) (Sidecar, error) {
 	sc := Sidecar{
 		Profile:         "owa",
 		Emulation:       true,
@@ -189,7 +193,7 @@ func WriteOWA(cal *icsparse.CalendarInfo, inputSHA256, outDir string) (Sidecar, 
 	if ev != nil {
 		res, err := sanitizeParts(ev, outDir)
 		if err != nil {
-			return failView(sc, outDir, fmt.Errorf("sanitize body: %w", err))
+			return failView(sc, outDir, g, fmt.Errorf("sanitize body: %w", err))
 		}
 		body = res
 	}
@@ -208,7 +212,7 @@ func WriteOWA(cal *icsparse.CalendarInfo, inputSHA256, outDir string) (Sidecar, 
 			sc.OtherEvents = append(sc.OtherEvents, cal.Events[i].Summary)
 			d, err := eventEvidence(&cal.Events[i], outDir)
 			if err != nil {
-				return failView(sc, outDir, fmt.Errorf("sanitize event %d body: %w", i+1, err))
+				return failView(sc, outDir, g, fmt.Errorf("sanitize event %d body: %w", i+1, err))
 			}
 			sc.OtherEventDetails = append(sc.OtherEventDetails, d)
 		}
@@ -219,7 +223,7 @@ func WriteOWA(cal *icsparse.CalendarInfo, inputSHA256, outDir string) (Sidecar, 
 		sc.Reason = reason
 		view.Skipped = true
 		view.Reason = reason
-		return sc, writeView(outDir, view)
+		return sc, writeView(outDir, view, g)
 	}
 
 	if ev.UID != nil {
@@ -309,7 +313,7 @@ func WriteOWA(cal *icsparse.CalendarInfo, inputSHA256, outDir string) (Sidecar, 
 		view.Attachments = append(view.Attachments, attachmentView{Name: attachmentName(att), Size: sizeText(att.Size)})
 	}
 
-	return sc, writeView(outDir, view)
+	return sc, writeView(outDir, view, g)
 }
 
 // maxAltDescParts bounds the HTML X-ALT-DESC parts sanitized per event.
@@ -396,6 +400,20 @@ func sanitizeParts(ev *icsparse.EventInfo, outDir string) (*SanitizeResult, erro
 
 // visibleHTML: the sanitized fragment shows text or an image.
 func visibleHTML(h string) bool {
+	// (style sheets are not content: an attribute selector naming
+	// owa-remote-ref must not count as a placeholder)
+	for {
+		i := strings.Index(h, "<style")
+		if i < 0 {
+			break
+		}
+		j := strings.Index(h[i:], "</style>")
+		if j < 0 {
+			h = h[:i]
+			break
+		}
+		h = h[:i] + h[i+j+len("</style>"):]
+	}
 	if strings.Contains(h, "<img") || strings.Contains(h, "owa-remote-ref") || strings.Contains(h, "<svg") {
 		return true
 	}
@@ -416,11 +434,11 @@ func visibleHTML(h string) bool {
 
 // failView records a build failure in the sidecar and writes a page that
 // states it, so the HTML always exists alongside a render_failed sidecar.
-func failView(sc Sidecar, outDir string, cause error) (Sidecar, error) {
+func failView(sc Sidecar, outDir string, g *buildGuard, cause error) (Sidecar, error) {
 	sc.Status = "render_failed"
 	sc.Error = cause.Error()
 	view := owaView{Failed: true, Reason: cause.Error(), InputSHA256: sc.InputSHA256}
-	if err := writeView(outDir, view); err != nil {
+	if err := writeView(outDir, view, g); err != nil {
 		return sc, fmt.Errorf("%v; and writing the failure page: %w", cause, err)
 	}
 	return sc, cause
@@ -483,11 +501,16 @@ func neutralizeBidi(v *owaView) {
 	v.OtherEvents = others
 }
 
-func writeView(outDir string, view owaView) error {
+func writeView(outDir string, view owaView, g *buildGuard) error {
 	neutralizeBidi(&view)
-	if abandoned.Load() && !view.Failed {
-		// WriteOWABudgeted gave up on this build and wrote a failure page.
-		return fmt.Errorf("view build abandoned")
+	if g != nil {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		if g.abandoned {
+			// WriteOWABudgeted gave up on this build and wrote a failure
+			// page; the write below must not replace it.
+			return fmt.Errorf("view build abandoned")
+		}
 	}
 	var buf bytes.Buffer
 	if err := owaTemplate.Execute(&buf, view); err != nil {

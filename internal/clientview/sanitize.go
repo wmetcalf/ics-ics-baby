@@ -65,7 +65,7 @@ const (
 	maxInlinePixels      = 16 << 20 // decoded pixels per inline image (e.g. 4096x4096)
 	maxInlinePixelsTotal = 64 << 20 // decoded pixels of all inline images of a body
 	maxMergedText        = 32 << 20 // bytes copied merging adjacent text in the parser
-	maxStackScan         = 32 << 20 // open-stack entries the parser's scope checks walk
+	maxStackScan         = 16 << 20 // open-stack entries the parser's scope checks walk
 	maxRebuiltAttrs      = 4 << 20  // attributes copied into re-created formatting elements
 	maxRebuiltBytes      = 64 << 20 // bytes of those attributes
 	maxInlineImages      = 1000     // data: image files written per body
@@ -236,20 +236,21 @@ var voidElements = map[string]bool{
 }
 
 type sanitizer struct {
-	inlineDir    string
-	refs         []RemoteRef
-	generated    map[*html.Node]bool // placeholders/labels we inserted
-	refSeen      map[string]bool
-	links        []Link
-	linkSeen     map[string]bool
-	dropped      []string
-	droppedSeen  map[string]bool
-	capped       bool
-	inlineSeen   map[string]bool // inline image files written
-	inlineFiles  int             // files in inlineDir, this body's included
-	inlinePixels int64           // decoded pixels of the kept inline images
-	pixelSeen    map[string]bool // sha256 of images already charged
-	styles       []*html.Node    // sanitized <style> elements, in order
+	inlineDir     string
+	refs          []RemoteRef
+	generated     map[*html.Node]bool // placeholders/labels we inserted
+	refSeen       map[string]bool
+	links         []Link
+	linkSeen      map[string]bool
+	dropped       []string
+	droppedSeen   map[string]bool
+	capped        bool
+	inlineSeen    map[string]bool // inline image files written
+	inlineFiles   int             // files in inlineDir, this body's included
+	inlinePixels  int64           // decoded pixels of the kept inline images
+	pixelSeen     map[string]bool // sha256 of images already charged
+	lastCanonical string          // canonical data: URL of the last kept inline image
+	styles        []*html.Node    // sanitized <style> elements, in order
 }
 
 func newSanitizer(inlineDir string) *sanitizer {
@@ -1204,9 +1205,9 @@ func (s *sanitizer) image(n *html.Node) *html.Node {
 				// Record and extract it like a src= data image; with no
 				// src, it becomes the image's src.
 				if _, ok := s.inlineImage(cand); ok && (!hasSrc || strings.TrimSpace(src) == "") {
-					src, hasSrc = cand, true
+					src, hasSrc = s.lastCanonical, true
 					removeAttr(n, "src")
-					n.Attr = append(n.Attr, html.Attribute{Key: "src", Val: cand})
+					n.Attr = append(n.Attr, html.Attribute{Key: "src", Val: src})
 				}
 				continue
 			}
@@ -1275,6 +1276,7 @@ func (s *sanitizer) attrs(n *html.Node, tag string) {
 			if _, ok := s.inlineImage(a.Val); !ok {
 				continue
 			}
+			a.Val = s.lastCanonical
 		case key == "href":
 			if !s.href(n, tag, &a) {
 				continue
@@ -1287,6 +1289,7 @@ func (s *sanitizer) attrs(n *html.Node, tag string) {
 			}
 			if strings.HasPrefix(strings.ToLower(v), "data:") {
 				if _, ok := s.inlineImage(v); ok {
+					a.Val = s.lastCanonical
 					break
 				}
 				continue
@@ -1590,6 +1593,11 @@ func (s *sanitizer) inlineImage(raw string) (RemoteRef, bool) {
 		}
 	}
 	s.addRef(r)
+	// The kept URL is rewritten to one canonical form per image, so
+	// aliases of the same bytes (extra media parameters, percent- vs
+	// base64-encoding) are one resource to Chromium too: the pixel budget
+	// charges each distinct image once.
+	s.lastCanonical = "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
 	return r, true
 }
 
@@ -1897,7 +1905,7 @@ func (s *sanitizer) declarations(body string) string {
 			u := strings.TrimSpace(firstNonEmpty(sub[1], sub[2], sub[3]))
 			if strings.HasPrefix(strings.ToLower(u), "data:") {
 				if _, ok := s.inlineImage(u); ok {
-					return m
+					return "url(" + s.lastCanonical + ")"
 				}
 				return "none"
 			}

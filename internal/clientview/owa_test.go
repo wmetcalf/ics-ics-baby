@@ -387,7 +387,7 @@ func TestWriteOWABudgeted(t *testing.T) {
 	orig := owaSanitize
 	block := make(chan struct{})
 	owaSanitize = func(string, string) (SanitizeResult, error) { <-block; return SanitizeResult{}, nil }
-	defer func() { owaSanitize = orig; close(block); abandoned.Store(false) }()
+	defer func() { owaSanitize = orig; close(block) }()
 	cal := parseICS(t, invite("REQUEST", `X-ALT-DESC;FMTTYPE=text/html:<p>x</p>`))
 	dir := t.TempDir()
 	start := time.Now()
@@ -400,6 +400,11 @@ func TestWriteOWABudgeted(t *testing.T) {
 	}
 	if b, rerr := os.ReadFile(filepath.Join(dir, OWAHTMLName)); rerr != nil || !strings.Contains(string(b), "longer than") {
 		t.Fatalf("failure page: %v %s", rerr, b)
+	}
+	// An abandoned build does not poison the next one.
+	owaSanitize = orig
+	if sc, err := WriteOWABudgeted(cal, "abc", t.TempDir(), 10*time.Second, 0); err != nil || sc.Status != "ok" {
+		t.Fatalf("next build: %+v %v", sc, err)
 	}
 }
 

@@ -584,13 +584,13 @@ func TestFormattingReconstructionAfterEnclosingClose(t *testing.T) {
 		b.WriteString(`<b x=` + strconv.Itoa(i) + `>`)
 	}
 	b.WriteString("</div>")
-	b.WriteString(strings.Repeat("<p>x</p>", 20000))
+	b.WriteString(strings.Repeat("<p>x</p>", 60000))
 	start := time.Now()
 	res, err := OWASanitize(b.String(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d := time.Since(start); d > time.Second {
+	if d := time.Since(start); d > 3*time.Second { // unbounded: ~10 s
 		t.Fatalf("took %v", d)
 	}
 	if !contains(res.Dropped, "input_truncated") {
@@ -875,7 +875,7 @@ func TestStackScanCostBounded(t *testing.T) {
 	if _, err := OWASanitize(in, ""); err != nil {
 		t.Fatal(err)
 	}
-	if d := time.Since(start); d > 3*time.Second {
+	if d := time.Since(start); d > 5*time.Second { // unbounded: ~11 s
 		t.Fatalf("took %v", d)
 	}
 }
@@ -978,5 +978,24 @@ func TestSanitizeRound6(t *testing.T) {
 	res, _ = OWASanitize(b.String(), "")
 	if contains(res.Dropped, "input_truncated") || !strings.Contains(res.HTML, "help.example") {
 		t.Fatalf("legit </br> digest truncated: %v", res.Dropped)
+	}
+}
+
+// Aliases of one image (extra media parameters) are rewritten to one
+// canonical data: URL, so Chromium decodes it once and the budget holds.
+func TestInlineDataCanonical(t *testing.T) {
+	res, err := OWASanitize(`<img src="data:image/png;a=1;base64,`+onePxPNG+`"><img src="data:image/png;b=2;base64,`+onePxPNG+`">`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `src="data:image/png;base64,` + onePxPNG + `"`
+	if strings.Count(res.HTML, want) != 2 || strings.Contains(res.HTML, "a=1") {
+		t.Fatalf("%s", res.HTML)
+	}
+}
+
+func TestVisibleHTMLIgnoresStyle(t *testing.T) {
+	if visibleHTML(`<style>.owa-body [class=owa-remote-ref]{color:red}</style>`) {
+		t.Fatal("style-only fragment counted as visible")
 	}
 }

@@ -3,15 +3,19 @@ package clientview
 import (
 	"fmt"
 	"runtime"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"ics-ics-baby/internal/icsparse"
 )
 
-// abandoned is set when WriteOWABudgeted gives up on a build; the build
-// goroutine then writes no view page over the failure page.
-var abandoned atomic.Bool
+// buildGuard lets WriteOWABudgeted abandon one build: once abandoned is
+// set (under mu, which writeView also holds while writing), that build's
+// goroutine writes no page over the failure page.
+type buildGuard struct {
+	mu        sync.Mutex
+	abandoned bool
+}
 
 // WriteOWABudgeted is WriteOWA bounded in time and Go heap. The sanitizer
 // models the HTML parser to bound its work, but a model can be wrong; this
@@ -28,8 +32,9 @@ func WriteOWABudgeted(cal *icsparse.CalendarInfo, inputSHA256, outDir string, ti
 		err error
 	}
 	done := make(chan result, 1)
+	g := &buildGuard{}
 	go func() {
-		sc, err := WriteOWA(cal, inputSHA256, outDir)
+		sc, err := writeOWAGuarded(cal, inputSHA256, outDir, g)
 		done <- result{sc, err}
 	}()
 	deadline := time.NewTimer(timeout)
@@ -51,10 +56,12 @@ func WriteOWABudgeted(cal *icsparse.CalendarInfo, inputSHA256, outDir string, ti
 			}
 		}
 	}
-	abandoned.Store(true)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.abandoned = true
 	sc := Sidecar{
 		Profile: "owa", Emulation: true, InputSHA256: inputSHA256,
 		RemoteRefs: []RemoteRef{}, Links: []Link{}, Dropped: []string{"build_budget_exceeded"}, BlockedRequests: []string{},
 	}
-	return failView(sc, outDir, fmt.Errorf("%s", why))
+	return failView(sc, outDir, nil, fmt.Errorf("%s", why))
 }
