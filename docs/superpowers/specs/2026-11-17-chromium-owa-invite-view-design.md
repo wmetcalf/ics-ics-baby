@@ -46,6 +46,11 @@ wrap this binary for Loadout. That adapter is **out of scope here**.
 
 ## Constraints
 
+- **Standalone first (Will, 2026-11-17).** ics-ics-baby stays a self-contained CLI that works
+  exactly as today. No blastbox imports, envelopes, or required config in this repo. Every new
+  behaviour is behind an opt-in flag. The blastbox engine is a separate wrapper that invokes the
+  binary; ics-ics-baby never knows whether it runs inside one.
+
 - The release binary stays statically linked with no runtime deps: Chromium is a runtime
   requirement **only** when `chromium` engine or `--invite-view` is selected; missing browser →
   clear error, non-zero exit for that step (same pattern as wkhtml).
