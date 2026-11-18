@@ -334,3 +334,36 @@ func TestFontFaceStripped(t *testing.T) {
 		t.Fatalf("remote font not recorded: %+v", res.RemoteRefs)
 	}
 }
+
+// A single <style> text node bypasses the HTML depth cut, so nested
+// conditional group rules must be bounded on their own: hostile invites with
+// tens of thousands of nested @media blocks must not stall WriteOWA (which
+// runs before Chromium's timeout applies).
+func TestCSSNestingBounded(t *testing.T) {
+	const levels = 50000
+	css := strings.Repeat("@media all{@supports (display:block){", levels/2) +
+		"p{color:red}" + strings.Repeat("}", levels)
+	start := time.Now()
+	res, err := OWASanitize("<style>"+css+"</style><p>x</p>", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("took %v", d)
+	}
+	if !contains(res.Dropped, "css:nesting_limit") {
+		t.Fatalf("dropped = %v", res.Dropped)
+	}
+	if strings.Count(res.HTML, "@media") > maxCSSNesting {
+		t.Fatalf("kept more than %d nested group rules", maxCSSNesting)
+	}
+
+	// Ordinary nesting keeps working.
+	res, err = OWASanitize(`<style>@media screen{@supports (display:grid){p{color:red}}}</style><p>x</p>`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.HTML, "@supports (display:grid){.owa-body p{color:red}}") || contains(res.Dropped, "css:nesting_limit") {
+		t.Fatalf("shallow nesting mangled: %s / %v", res.HTML, res.Dropped)
+	}
+}

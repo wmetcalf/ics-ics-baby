@@ -55,6 +55,7 @@ const (
 	maxRecorded         = 1000    // remote refs / links recorded
 	maxLabel            = 120     // characters of a value shown in a placeholder
 	maxLinkText         = 200
+	maxCSSNesting       = 16 // nested @media/@supports kept
 	depthHeadroom       = 32 // parser stack used by html/context/implied elements
 	outputSlack         = 4096
 )
@@ -715,11 +716,14 @@ var (
 func (s *sanitizer) stylesheet(css string) string {
 	css = cssComment.ReplaceAllString(css, "")
 	var out strings.Builder
-	s.ruleList(css, &out)
+	s.ruleList(css, &out, 0)
 	return out.String()
 }
 
-func (s *sanitizer) ruleList(css string, out *strings.Builder) {
+// ruleList sanitizes a rule list nested inside depth group rules. The depth
+// bound keeps hostile nesting linear: a whole stylesheet is one text node, so
+// the HTML depth cut never sees it, and each level rescans its body.
+func (s *sanitizer) ruleList(css string, out *strings.Builder, depth int) {
 	i := 0
 	for i < len(css) {
 		for i < len(css) && isCSSSpace(css[i]) {
@@ -758,7 +762,7 @@ func (s *sanitizer) ruleList(css string, out *strings.Builder) {
 		}
 		i = close
 		if strings.HasPrefix(prelude, "@") {
-			s.atRule(prelude, body, out)
+			s.atRule(prelude, body, out, depth)
 			continue
 		}
 		sel := s.selectors(prelude)
@@ -772,7 +776,7 @@ func (s *sanitizer) ruleList(css string, out *strings.Builder) {
 	}
 }
 
-func (s *sanitizer) atRule(prelude, body string, out *strings.Builder) {
+func (s *sanitizer) atRule(prelude, body string, out *strings.Builder, depth int) {
 	name := atName(prelude)
 	switch name {
 	case "media", "supports":
@@ -780,8 +784,12 @@ func (s *sanitizer) atRule(prelude, body string, out *strings.Builder) {
 			s.drop("css:@" + name)
 			return
 		}
+		if depth >= maxCSSNesting {
+			s.drop("css:nesting_limit")
+			return
+		}
 		var inner strings.Builder
-		s.ruleList(body, &inner)
+		s.ruleList(body, &inner, depth+1)
 		out.WriteString(prelude)
 		out.WriteByte('{')
 		out.WriteString(inner.String())
