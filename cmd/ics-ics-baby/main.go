@@ -1,13 +1,10 @@
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -260,12 +257,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "failed to write manifest: %v\n", err)
 	}
 
-	inputSHA := ""
-	if inviteView != "" || findingsJSON {
-		if inputSHA, err = fileSHA256(icsPath); err != nil {
-			fmt.Fprintf(os.Stderr, "hash input: %v\n", err)
-		}
-	}
+	inputSHA := cal.InputSHA256 // hash of the exact bytes parsed
 
 	findingsPath := ""
 	if findingsJSON {
@@ -390,7 +382,7 @@ func writeOWAView(cal *icsparse.CalendarInfo, inputSHA, outDir string, width int
 
 	// Outputs from an earlier run into the same directory must not survive
 	// next to this run's sidecar.
-	for _, stale := range []string{pngPath, filepath.Join(outDir, clientview.InlineDirName)} {
+	for _, stale := range []string{htmlPath, pngPath, filepath.Join(outDir, clientview.InlineDirName)} {
 		if err := os.RemoveAll(stale); err != nil {
 			fmt.Fprintf(os.Stderr, "owa view: remove stale %s: %v\n", stale, err)
 		}
@@ -434,17 +426,4 @@ func writeOWAView(cal *icsparse.CalendarInfo, inputSHA, outDir string, width int
 		wrote = append(wrote, "Wrote OWA PNG: "+pngPath)
 	}
 	return failed, wrote
-}
-
-func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }

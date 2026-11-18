@@ -3,6 +3,8 @@ package icsparse
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/base64"
 	"fmt"
 	htmlstd "html"
@@ -117,6 +119,8 @@ type CalendarInfo struct {
 	AutoprocessingSignals *AutoprocessingSignals `json:"autoprocessing_signals,omitempty"`
 	// Findings are the stable-coded forms of the calendar-level alert strings.
 	Findings []Finding `json:"-"`
+	// InputSHA256 is the hex sha256 of the exact bytes parsed (ParseICSFile).
+	InputSHA256 string `json:"-"`
 }
 
 func (c *CalendarInfo) Manifest() map[string]any {
@@ -426,6 +430,8 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 	}
 
 	var cal CalendarInfo
+	inputSum := sha256.Sum256(b)
+	cal.InputSHA256 = hex.EncodeToString(inputSum[:])
 	var calLevelProps map[string]string
 	var inEvent bool
 	var cur map[string]string

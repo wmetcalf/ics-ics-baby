@@ -1,6 +1,8 @@
 package icsparse
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -138,5 +140,28 @@ func TestEngineContractListsEveryCode(t *testing.T) {
 		if got[code] != meta.Severity {
 			t.Errorf("contract %s severity %q, table %q", code, got[code], meta.Severity)
 		}
+	}
+}
+
+// Deferred minor: the input hash must be of the exact bytes parsed, not of a
+// second read of the file.
+func TestInputSHA256OfParsedBytes(t *testing.T) {
+	p := "../../ics-parser-test-suite/ics_files/09-combo-spoof-urgent.ics"
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cal, err := ParseICSFile(p, "", 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(raw)
+	if cal.InputSHA256 != hex.EncodeToString(sum[:]) {
+		t.Fatalf("InputSHA256 = %q", cal.InputSHA256)
+	}
+	b, _ := json.Marshal(cal)
+	m, _ := json.Marshal(cal.Manifest())
+	if strings.Contains(string(b)+string(m), cal.InputSHA256) {
+		t.Fatal("input hash leaked into JSON/manifest")
 	}
 }
