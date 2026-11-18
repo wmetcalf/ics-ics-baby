@@ -165,3 +165,30 @@ func TestInputSHA256OfParsedBytes(t *testing.T) {
 		t.Fatal("input hash leaked into JSON/manifest")
 	}
 }
+
+// Gap finding-order-map-dependent: alerts derived from vendor-header maps must
+// come out in the same order on every parse.
+func TestHeaderAlertOrderDeterministic(t *testing.T) {
+	ics := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nX-GOOGLE-CONFERENCE-A:https://a.example/x\r\nX-GOOGLE-MEET-B:https://b.example/y\r\nX-GOOGLE-CONFERENCE-C:https://c.example/z\r\n" +
+		"BEGIN:VEVENT\r\nUID:o@test\r\nSUMMARY:x\r\n" +
+		"X-MICROSOFT-MEETING-A:https://a.example/1\r\nX-MICROSOFT-TEAMS-B:https://b.example/2\r\nX-MICROSOFT-MEETING-C:https://c.example/3\r\nX-MICROSOFT-OTHER-D:https://d.example/4\r\n" +
+		"X-GOOGLE-CONFERENCE-E:https://e.example/5\r\nX-GOOGLE-MEET-F:https://f.example/6\r\nX-GOOGLE-CONFERENCE-G:https://g.example/7\r\n" +
+		"END:VEVENT\r\nEND:VCALENDAR\r\n"
+	first := ""
+	for i := 0; i < 30; i++ {
+		cal := parseInline(t, ics)
+		var parts []string
+		for _, f := range cal.Findings {
+			parts = append(parts, f.Message)
+		}
+		for _, f := range cal.Events[0].Findings {
+			parts = append(parts, f.Message)
+		}
+		got := strings.Join(parts, "\n")
+		if i == 0 {
+			first = got
+		} else if got != first {
+			t.Fatalf("parse %d gave a different alert order", i)
+		}
+	}
+}

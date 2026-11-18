@@ -332,10 +332,6 @@ id = "finding-severity-first-pass"
 description = "Finding severities are a first pass by the builder; codes are stable but severities may be retuned."
 
 [[gaps]]
-id = "finding-order-map-dependent"
-description = "Alerts derived from iterating vendor-header maps (unusual_teams_header, ms_header_url, ms_header_open_redirect, google_*) are emitted in Go map order, so findings[] order can differ between runs of the same input. Consumers must not rely on order."
-
-[[gaps]]
 id = "attachment-count"
 description = "Attachment extraction is bounded per component (1000) and per file size (--max-attachment-bytes), not per calendar; a hostile calendar can declare many attachment-* artifacts. The worker's Limits must bound it."
 

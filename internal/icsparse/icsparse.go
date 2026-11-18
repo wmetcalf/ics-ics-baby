@@ -4,13 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/sha256"
-	"encoding/hex"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	htmlstd "html"
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -2737,7 +2738,8 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 			"X-MICROSOFT-CDO-OWNERAPPTID":             true,
 		}
 
-		for key, val := range signals.MicrosoftHeaders {
+		for _, key := range sortedKeys(signals.MicrosoftHeaders) {
+			val := signals.MicrosoftHeaders[key]
 			// Skip SKYPETEAMSMEETINGURL since we already flagged it above
 			if key == "X-MICROSOFT-SKYPETEAMSMEETINGURL" {
 				continue
@@ -2793,7 +2795,8 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 	}
 
 	if len(signals.GoogleHeaders) > 0 {
-		for key, val := range signals.GoogleHeaders {
+		for _, key := range sortedKeys(signals.GoogleHeaders) {
+			val := signals.GoogleHeaders[key]
 			if strings.Contains(strings.ToUpper(key), "CONFERENCE") || strings.Contains(strings.ToUpper(key), "MEET") {
 				// Check if this is actually a Google Meet URL or a redirect
 				if strings.Contains(strings.ToLower(val), "meet.google.com") && !strings.Contains(strings.ToLower(val), "linkredirect") {
@@ -3027,7 +3030,8 @@ func analyzeCalendarAutoprocessingSignals(cal *CalendarInfo, calLevelProps map[s
 	}
 
 	// Check Google headers for conference/meeting indicators
-	for key, val := range signals.GoogleHeaders {
+	for _, key := range sortedKeys(signals.GoogleHeaders) {
+		val := signals.GoogleHeaders[key]
 		if strings.Contains(strings.ToUpper(key), "CONFERENCE") || strings.Contains(strings.ToUpper(key), "MEET") {
 			// Check if this is actually a Google Meet URL or a redirect
 			if strings.Contains(strings.ToLower(val), "meet.google.com") && !strings.Contains(strings.ToLower(val), "linkredirect") {
@@ -3056,4 +3060,15 @@ func analyzeCalendarAutoprocessingSignals(cal *CalendarInfo, calLevelProps map[s
 		cal.AutoprocessingSignals = signals
 		cal.Findings = alert.findings
 	}
+}
+
+// sortedKeys returns the map's keys in order, so alerts derived from header
+// maps do not depend on map iteration order.
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
