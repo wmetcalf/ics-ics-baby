@@ -556,3 +556,26 @@ func TestCLIFindingsJSON(t *testing.T) {
 		t.Fatal("findings written without --findings-json")
 	}
 }
+
+// Review finding 6: a skipped rerun into the same --out must not leave the
+// previous run's OWA PNG or inline images next to a "skipped" sidecar.
+func TestCLIInviteViewNoStaleOutputs(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "o")
+	if err := os.MkdirAll(filepath.Join(out, "ics-ics-baby-inline"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"ics-ics-baby-owa.png", "ics-ics-baby-inline/old.png"} {
+		if err := os.WriteFile(filepath.Join(out, f), []byte("stale"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res := runCLI(t, "--out", out, "--invite-view", "owa", fixtureDir+"20-reply-spoof.ics")
+	if res.exit != 0 {
+		t.Fatalf("exit %d: %s", res.exit, res.stderr)
+	}
+	for _, f := range []string{"ics-ics-baby-owa.png", "ics-ics-baby-inline"} {
+		if fileExists(filepath.Join(out, f)) {
+			t.Errorf("stale %s survived a skipped run", f)
+		}
+	}
+}

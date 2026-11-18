@@ -253,3 +253,66 @@ func TestSelectorsStayInBody(t *testing.T) {
 		t.Fatalf("legit sibling selector lost: %s", res.HTML)
 	}
 }
+
+// Review finding 1: placeholders grow the markup past the cap; the output must
+// be cut at node boundaries, never mid-tag or inside an open <style>.
+func TestSanitizeOutputCapWellFormed(t *testing.T) {
+	in := strings.Repeat("<img src=//a>", 8736) + "<style>p{x:" + strings.Repeat("a", 5000) + "}</style><p>tail</p>"
+	res, err := OWASanitize(in, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.HTML) > maxSanitizeInput {
+		t.Fatalf("output %d > cap", len(res.HTML))
+	}
+	if !contains(res.Dropped, "output_truncated") {
+		t.Fatalf("dropped = %v", res.Dropped)
+	}
+	if strings.Count(res.HTML, "<style") != strings.Count(res.HTML, "</style>") {
+		t.Fatal("output ends inside a <style> element")
+	}
+	if strings.Count(res.HTML, "<span") != strings.Count(res.HTML, "</span>") || strings.HasSuffix(res.HTML, "sty") {
+		t.Fatalf("output cut mid-element: ...%s", res.HTML[len(res.HTML)-80:])
+	}
+}
+
+// Review finding 2: root selectors must target an inner element, never the
+// clipping container itself.
+func TestRootSelectorsTargetInnerRoot(t *testing.T) {
+	res, err := OWASanitize(`<style>body{overflow:visible!important} html body p{color:red} :root{margin:0}</style>`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.HTML, ".owa-body{") || strings.Contains(res.HTML, ".owa-body ") && !strings.Contains(res.HTML, ".owa-body .owa-root") {
+		t.Fatalf("root selector styles the container: %s", res.HTML)
+	}
+	for _, want := range []string{".owa-body .owa-root{overflow:visible!important}", ".owa-body .owa-root p{color:red}"} {
+		if !strings.Contains(res.HTML, want) {
+			t.Fatalf("missing %q in %s", want, res.HTML)
+		}
+	}
+}
+
+// Review finding 3: position:fixed through a custom property.
+func TestPositionVarRejected(t *testing.T) {
+	res, err := OWASanitize(`<div style="--p:fixed;position:var(--p);top:0">x</div><style>.o{--p:fixed;position:var(--p)}</style>`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.HTML, "position:var") {
+		t.Fatalf("position:var survived: %s", res.HTML)
+	}
+}
+
+// Review finding 4: raw-text elements that swallow the rest of the page.
+func TestRawTextElementsDropped(t *testing.T) {
+	for _, tag := range []string{"plaintext", "xmp", "noembed", "noframes", "listing"} {
+		res, err := OWASanitize("hi<"+tag+">x</"+tag+">", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(res.HTML, "<"+tag) {
+			t.Errorf("%s kept: %s", tag, res.HTML)
+		}
+	}
+}

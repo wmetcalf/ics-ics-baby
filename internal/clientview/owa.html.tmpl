@@ -34,7 +34,8 @@
   .owa-people h3, .owa-attach h3 { font-size: 12px; font-weight: 600; color: #616161; margin: 0 0 6px 0; text-transform: uppercase; letter-spacing: .02em; }
   .owa-people ul, .owa-attach ul, .owa-other ul { margin: 0 0 8px 0; padding-left: 18px; }
   .owa-body-wrap { padding: 16px 24px; border-bottom: 1px solid #edebe9; }
-  .owa-body { position: relative; overflow: hidden; word-break: break-word; }
+  /* The body is attacker-styled: clip and isolate it so nothing paints over the chrome. */
+  .owa-body { position: relative; overflow: hidden; contain: paint; isolation: isolate; z-index: 0; word-break: break-word; }
   .owa-plain { white-space: pre-wrap; font-family: inherit; margin: 0; }
   .owa-attach, .owa-other { padding: 12px 24px; border-bottom: 1px solid #edebe9; }
   .owa-attach li span { color: #616161; }
@@ -83,7 +84,7 @@
     {{- if .Optional}}<h3>Optional</h3><ul>{{range .Optional}}<li>{{.}}</li>{{end}}</ul>{{end}}
   </div>
   {{- end}}
-  <div class="owa-body-wrap"><div class="owa-body">{{if .BodyIsHTML}}{{.BodyHTML}}{{else}}<pre class="owa-plain">{{.BodyText}}</pre>{{end}}</div></div>
+  <div class="owa-body-wrap"><div class="owa-body"><div class="owa-root">{{if .BodyIsHTML}}{{.BodyHTML}}{{else}}<pre class="owa-plain">{{.BodyText}}</pre>{{end}}</div></div></div>
   {{- if .Attachments}}
   <div class="owa-attach"><h3>Attachments</h3><ul>{{range .Attachments}}<li>{{.Name}}{{if .Size}} <span>({{.Size}})</span>{{end}}</li>{{end}}</ul></div>
   {{- end}}

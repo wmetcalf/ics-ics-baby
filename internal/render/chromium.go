@@ -145,14 +145,30 @@ func RenderHTMLWithChromium(htmlPath, pngPath string, width int, opts ChromiumSe
 
 	var mu sync.Mutex
 	var blockedURLs []string
+	var handlerDone chan struct{}
+	// collect stops the browser (so no handler is mid-append) and returns the
+	// blocked URLs gathered so far. Used on success and on every error path.
+	collect := func() []string {
+		cancel()
+		acancel()
+		if handlerDone != nil {
+			<-handlerDone
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		return dedupSorted(blockedURLs)
+	}
+	fail := func(step string, err error) ([]string, error) {
+		return collect(), chromiumErr(tctx, timeout, step, err)
+	}
 
 	// Start the browser and target, then turn JS off and interception on
 	// before any navigation away from about:blank.
 	if _, err := chromedp.Call(ctx, emulation.SetScriptExecutionDisabled, emulation.SetScriptExecutionDisabledParams{Value: true}); err != nil {
-		return nil, chromiumErr(tctx, timeout, "disable javascript", err)
+		return fail("disable javascript", err)
 	}
 	paused := chromedp.Events(ctx, fetch.RequestPaused)
-	handlerDone := make(chan struct{})
+	handlerDone = make(chan struct{})
 	go func() {
 		defer close(handlerDone)
 		for ev, err := range paused {
@@ -170,20 +186,26 @@ func RenderHTMLWithChromium(htmlPath, pngPath string, width int, opts ChromiumSe
 		}
 	}()
 	if _, err := chromedp.Call(ctx, fetch.Enable, fetch.EnableParams{Patterns: []*fetch.RequestPattern{{URLPattern: "*"}}}); err != nil {
-		return nil, chromiumErr(tctx, timeout, "enable request interception", err)
+		return fail("enable request interception", err)
 	}
 	if _, err := chromedp.Call(ctx, emulation.SetDeviceMetricsOverride, emulation.SetDeviceMetricsOverrideParams{
 		Width: int64(width), Height: 800, DeviceScaleFactor: 1,
 	}); err != nil {
-		return nil, chromiumErr(tctx, timeout, "set viewport", err)
+		return fail("set viewport", err)
 	}
 	if err := chromedp.Do(ctx, chromedp.Navigate(pageURL)); err != nil {
-		return nil, chromiumErr(tctx, timeout, "load html", err)
+		return fail("load html", err)
+	}
+
+	if chromiumAfterLoadHook != nil {
+		if err := chromiumAfterLoadHook(); err != nil {
+			return fail("after load", err)
+		}
 	}
 
 	metrics, err := chromedp.Call(ctx, page.GetLayoutMetrics, cdp.Empty{})
 	if err != nil {
-		return nil, chromiumErr(tctx, timeout, "layout metrics", err)
+		return fail("layout metrics", err)
 	}
 	height := 800.0
 	if metrics.CSSContentSize != nil && metrics.CSSContentSize.Height > 0 {
@@ -199,17 +221,10 @@ func RenderHTMLWithChromium(htmlPath, pngPath string, width int, opts ChromiumSe
 		CaptureBeyondViewport: &beyond,
 	})
 	if err != nil {
-		return nil, chromiumErr(tctx, timeout, "capture screenshot", err)
+		return fail("capture screenshot", err)
 	}
 
-	// Stop the browser before reading the blocked list so no handler is mid-append.
-	cancel()
-	acancel()
-	<-handlerDone
-
-	mu.Lock()
-	blocked = dedupSorted(blockedURLs)
-	mu.Unlock()
+	blocked = collect()
 
 	if err := os.WriteFile(pngPath, shot.Data, 0o644); err != nil {
 		return blocked, fmt.Errorf("write png: %w", err)
@@ -258,3 +273,6 @@ func dedupSorted(in []string) []string {
 	sort.Strings(out)
 	return out
 }
+
+// chromiumAfterLoadHook, when set by tests, fails a render after the page loaded.
+var chromiumAfterLoadHook func() error

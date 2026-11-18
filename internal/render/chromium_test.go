@@ -1,6 +1,7 @@
 package render
 
 import (
+	"errors"
 	"image/png"
 	"net/http"
 	"net/http/httptest"
@@ -157,5 +158,22 @@ func TestChromiumMissingBinary(t *testing.T) {
 	}
 	if _, err := FindChromium("/nonexistent"); err == nil {
 		t.Fatal("FindChromium(/nonexistent) succeeded")
+	}
+}
+
+// Review finding 5: a render that fails after requests were blocked must still
+// return the blocked URLs (they are evidence for exactly the hung pages).
+func TestChromiumBlockedReturnedOnError(t *testing.T) {
+	requireChromium(t)
+	srv, _ := hitServer(t)
+	dir, htmlPath := writeHTML(t, `<img src="`+srv.URL+`/evidence.gif">`)
+	chromiumAfterLoadHook = func() error { return errors.New("injected failure after load") }
+	defer func() { chromiumAfterLoadHook = nil }()
+	blocked, err := RenderHTMLWithChromium(htmlPath, filepath.Join(dir, "out.png"), 800, ChromiumSettings{})
+	if err == nil {
+		t.Fatal("expected the injected failure")
+	}
+	if !containsSuffix(blocked, "/evidence.gif") {
+		t.Fatalf("blocked = %v on error, want the /evidence.gif URL", blocked)
 	}
 }

@@ -56,6 +56,7 @@ const (
 	maxLabel            = 120     // characters of a value shown in a placeholder
 	maxLinkText         = 200
 	depthHeadroom       = 32 // parser stack used by html/context/implied elements
+	outputSlack         = 4096
 )
 
 // ---------------------------------------------------------------------------
@@ -69,6 +70,8 @@ var droppedElements = map[string]bool{
 	"embed": true, "applet": true, "input": true, "button": true,
 	"select": true, "textarea": true, "meta": true, "link": true, "base": true,
 	"noscript": true, "title": true, "template": true, "param": true,
+	// Raw-text elements: kept verbatim they can swallow the rest of the page.
+	"plaintext": true, "xmp": true, "noembed": true, "noframes": true, "listing": true,
 	// SVG animation can rewrite attributes (e.g. href) without script.
 	"set": true, "animate": true, "animatemotion": true, "animatetransform": true,
 	"handler": true, "listener": true,
@@ -211,6 +214,11 @@ func OWASanitize(raw string, inlineDir string) (SanitizeResult, error) {
 
 	s.walk(root)
 
+	// Placeholders can grow the markup past the cap. Prune whole nodes in
+	// document order so the output is a well-formed prefix; never slice text.
+	if s.prune(root, maxSanitizeInput-outputSlack) {
+		s.drop("output_truncated")
+	}
 	var buf bytes.Buffer
 	for c := root.FirstChild; c != nil; c = c.NextSibling {
 		if err := html.Render(&buf, c); err != nil {
@@ -219,8 +227,8 @@ func OWASanitize(raw string, inlineDir string) (SanitizeResult, error) {
 	}
 	out := buf.String()
 	if len(out) > maxSanitizeInput {
-		// Placeholders can grow the markup; never emit more than the cap.
-		out = truncateUTF8(out, maxSanitizeInput)
+		// The size estimate was off; emit nothing rather than a cut tag.
+		out = ""
 		s.drop("output_truncated")
 	}
 	return SanitizeResult{HTML: out, RemoteRefs: s.refs, Links: s.links, Dropped: s.dropped}, nil
@@ -257,6 +265,71 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 		}
 		off += n
 	}
+}
+
+// prune removes, in document order, every node from the first one that would
+// take the rendered size past budget. It reports whether anything was removed.
+func (s *sanitizer) prune(root *html.Node, budget int) bool {
+	size := 0
+	over := false
+	stack := []*html.Node{}
+	pushKids := func(n *html.Node) {
+		var kids []*html.Node
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			kids = append(kids, c)
+		}
+		for i := len(kids) - 1; i >= 0; i-- {
+			stack = append(stack, kids[i])
+		}
+	}
+	pushKids(root)
+	for len(stack) > 0 {
+		n := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if over {
+			n.Parent.RemoveChild(n)
+			continue
+		}
+		size += renderedSize(n)
+		if size > budget {
+			over = true
+			n.Parent.RemoveChild(n)
+			continue
+		}
+		pushKids(n)
+	}
+	return over
+}
+
+// renderedSize is an upper bound on the bytes html.Render emits for n itself
+// (its tags and attributes, or its text), excluding its children.
+func renderedSize(n *html.Node) int {
+	switch n.Type {
+	case html.TextNode:
+		if n.Parent != nil && n.Parent.Type == html.ElementNode && n.Parent.DataAtom == atom.Style {
+			return len(n.Data)
+		}
+		return escapedLen(n.Data)
+	case html.ElementNode:
+		size := 2*len(n.Data) + 5
+		for _, a := range n.Attr {
+			size += len(a.Namespace) + len(a.Key) + escapedLen(a.Val) + 5
+		}
+		return size
+	default:
+		return 0
+	}
+}
+
+func escapedLen(s string) int {
+	n := len(s)
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '&', '<', '>', '"', '\'', '\r':
+			n += 5
+		}
+	}
+	return n
 }
 
 type frame struct {
@@ -742,7 +815,9 @@ func (s *sanitizer) selectors(prelude string) string {
 			continue
 		}
 		scoped := scopeSelector(prefixSelectorNames(sel))
-		if rest := strings.TrimSpace(strings.TrimPrefix(scoped, ".owa-body")); strings.HasPrefix(rest, "~") || strings.HasPrefix(rest, "+") {
+		rest := strings.TrimPrefix(scoped, ".owa-body")
+		rest = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(rest), ".owa-root"))
+		if strings.HasPrefix(rest, "~") || strings.HasPrefix(rest, "+") {
 			s.drop("css:sibling_of_body")
 			continue
 		}
@@ -760,7 +835,7 @@ func scopeSelector(sel string) string {
 		if end > 0 && end <= len(sel) && !isRootTokenChar(sel[end-1]) {
 			end--
 		}
-		return ".owa-body" + sel[end:]
+		return ".owa-body .owa-root" + sel[end:]
 	}
 	return ".owa-body " + sel
 }
@@ -828,6 +903,9 @@ func (s *sanitizer) declarations(body string) string {
 			continue
 		case prop == "position" && strings.Contains(lval, "fixed"):
 			s.drop("css:position_fixed")
+			continue
+		case prop == "position" && (strings.Contains(lval, "var(") || strings.Contains(lval, "env(") || strings.Contains(lval, "attr(")):
+			s.drop("css:position_indirect")
 			continue
 		case strings.Contains(lval, "image-set(") || strings.Contains(lval, "src("):
 			s.drop("css:image_set")
