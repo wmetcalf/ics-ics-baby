@@ -94,12 +94,14 @@ func main() {
 	var chromiumMaxHeight int
 	var inviteView string
 	var findingsJSON bool
+	var maxAttachments int
 
 	flag.StringVar(&outDir, "out", "out", "Output directory")
 	flag.StringVar(&screenshot, "screenshot", "", "Output PNG path (default: OUT/preview.png)")
 	flag.StringVar(&htmlOut, "html", "", "Output HTML path (default: OUT/preview.html)")
 	flag.BoolVar(&download, "download-attachments", false, "Download URL attachments")
 	flag.Int64Var(&maxAttachBytes, "max-attachment-bytes", 100<<20, "Maximum size to allow per attachment in bytes (default 100 MiB)")
+	flag.IntVar(&maxAttachments, "max-attachments", 0, "Maximum number of attachment files saved per calendar (0 = unlimited)")
 	flag.Int64Var(&maxICSBytes, "max-ics-bytes", 500<<20, "Maximum size to allow for ICS file in bytes (default 500 MiB)")
 	flag.StringVar(&tzDefault, "timezone", "", "Default timezone for naive dates (e.g., America/Chicago)")
 	flag.StringVar(&startStr, "start", "", "Filter start date (YYYY-MM-DD) inclusive")
@@ -153,6 +155,7 @@ func main() {
 		fmt.Println("\nAttachment options:")
 		fmt.Println("  --download-attachments          Download URL attachments (contacts remote hosts)")
 		fmt.Println("  --max-attachment-bytes N        Maximum size per attachment in bytes (default: 100 MiB)")
+		fmt.Println("  --max-attachments N             Maximum attachment files saved per calendar (default: unlimited)")
 		fmt.Println("  --max-ics-bytes N               Maximum ICS file size in bytes (default: 500 MiB)")
 		fmt.Println("\nClient view options:")
 		fmt.Println("  --findings-json                 Also write stable-coded findings (ics-ics-baby-findings.json)")
@@ -240,7 +243,7 @@ func main() {
 		cal.FilterRange(start, end)
 	}
 
-	if err := attach.ExtractAll(cal, outDir, download, maxAttachBytes); err != nil {
+	if err := attach.ExtractAllLimited(cal, outDir, download, maxAttachBytes, maxAttachments); err != nil {
 		fmt.Fprintf(os.Stderr, "attachment error: %v\n", err)
 	}
 

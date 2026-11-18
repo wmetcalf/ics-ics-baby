@@ -3,7 +3,8 @@
 # ics-ics-baby is a standalone CLI; this file describes what the OPTIONAL blastbox engine
 # wrapper (planned beside email-render in msg-mbox-to-eml/src/mail_engines/, engine name
 # `ics-ics-baby`) declares when it runs this binary as
-#   ics-ics-baby --screenshot-engine chromium --invite-view owa --findings-json --out OUTDIR INPUT
+#   ics-ics-baby --screenshot-engine chromium --invite-view owa --findings-json \
+#     --max-attachments 1000 --out OUTDIR INPUT
 # offline and never with --download-attachments. The wrapper does not exist yet (gap
 # wrapper-not-built); the artifact paths and finding codes below are what the CLI writes TODAY.
 # Spec: docs/superpowers/specs/2026-11-17-chromium-owa-invite-view-design.md
@@ -78,9 +79,9 @@ description = "owa-html rasterized by headless Chromium. Absent when the view is
 id = "attachment-*"
 path = "ics-ics-baby-attachments/*"
 kind = "file"
-max_count = 0
+max_count = 1000
 role = "attachment"
-description = "Inline (base64) ATTACH payloads extracted by the parser. URL attachments are never fetched. The parser caps attachments at 1000 per component, not per file, so the count is uncapped here (see gap attachment-count)."
+description = "Inline (base64) ATTACH payloads extracted by the parser. URL attachments are never fetched. --max-attachments 1000 caps saved files per calendar; past the cap the rest stay unsaved and stderr says 'attachment limit reached'."
 
 [[artifacts]]
 id = "inline-*"
@@ -330,10 +331,6 @@ description = "With several VEVENTs the OWA view renders the first and lists the
 [[gaps]]
 id = "finding-severity-first-pass"
 description = "Finding severities are a first pass by the builder; codes are stable but severities may be retuned."
-
-[[gaps]]
-id = "attachment-count"
-description = "Attachment extraction is bounded per component (1000) and per file size (--max-attachment-bytes), not per calendar; a hostile calendar can declare many attachment-* artifacts. The worker's Limits must bound it."
 
 [[gaps]]
 id = "remote-refs-not-fetched"

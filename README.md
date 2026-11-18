@@ -18,7 +18,7 @@ Security-oriented heuristics drive the renderer: descriptions are normalised for
 - **Attachment extraction**: inline base64 blobs (including vCards) and remote links are saved into the output directory.
 - **URL harvesting**: every description/todo body is scanned for URLs and surfaced in the manifest.
 
-> ⚠️ `--download-attachments` contacts remote hosts. Use it only on trusted networks and adjust `--max-attachment-bytes` (default 100 MiB) to keep per-file size in check.
+> ⚠️ `--download-attachments` contacts remote hosts. Use it only on trusted networks and adjust `--max-attachment-bytes` (default 100 MiB) to keep per-file size in check. `--max-attachments N` caps how many attachment files are saved per calendar (default: unlimited).
 
 ## Installation
 

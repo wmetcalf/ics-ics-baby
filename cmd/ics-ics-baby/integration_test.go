@@ -579,3 +579,26 @@ func TestCLIInviteViewNoStaleOutputs(t *testing.T) {
 		}
 	}
 }
+
+func TestCLIMaxAttachments(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:a@test\r\nSUMMARY:att\r\n")
+	for i := 0; i < 3; i++ {
+		b.WriteString("ATTACH;FMTTYPE=text/plain;ENCODING=BASE64;VALUE=BINARY:aGVsbG8=\r\n")
+	}
+	b.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
+	dir := t.TempDir()
+	in := filepath.Join(dir, "a.ics")
+	if err := os.WriteFile(in, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "o")
+	res := runCLI(t, "--out", out, "--max-attachments", "2", in)
+	if res.exit != 0 {
+		t.Fatalf("exit %d: %s", res.exit, res.stderr)
+	}
+	ents, _ := os.ReadDir(filepath.Join(out, "ics-ics-baby-attachments"))
+	if len(ents) != 2 || !strings.Contains(res.stderr, "attachment limit reached") {
+		t.Fatalf("files=%d stderr=%q", len(ents), res.stderr)
+	}
+}
