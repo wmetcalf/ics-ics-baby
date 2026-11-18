@@ -96,6 +96,7 @@ func main() {
 	var chromiumNoSandbox bool
 	var chromiumMaxHeight int
 	var inviteView string
+	var findingsJSON bool
 
 	flag.StringVar(&outDir, "out", "out", "Output directory")
 	flag.StringVar(&screenshot, "screenshot", "", "Output PNG path (default: OUT/preview.png)")
@@ -121,6 +122,7 @@ func main() {
 	flag.BoolVar(&chromiumNoSandbox, "chromium-no-sandbox", false, "Disable the Chromium sandbox (only for containers that cannot provide it)")
 	flag.IntVar(&chromiumMaxHeight, "chromium-max-height", 20000, "Maximum Chromium capture height in pixels")
 	flag.StringVar(&inviteView, "invite-view", "", "Also write an emulated client view of the invite: owa (rendered with headless Chromium)")
+	flag.BoolVar(&findingsJSON, "findings-json", false, "Also write stable-coded findings to OUT/ics-ics-baby-findings.json")
 	flag.BoolVar(&hideSecurityAlerts, "hide-security-alerts", false, "Hide security alert warnings in HTML/PNG output (default: show alerts)")
 
 	flag.Parse()
@@ -156,6 +158,7 @@ func main() {
 		fmt.Println("  --max-attachment-bytes N        Maximum size per attachment in bytes (default: 100 MiB)")
 		fmt.Println("  --max-ics-bytes N               Maximum ICS file size in bytes (default: 500 MiB)")
 		fmt.Println("\nClient view options:")
+		fmt.Println("  --findings-json                 Also write stable-coded findings (ics-ics-baby-findings.json)")
 		fmt.Println("  --invite-view owa               Also write an emulated Outlook-on-the-web view (HTML, sidecar JSON, PNG via Chromium)")
 		fmt.Println("\nScreenshot engine options:")
 		fmt.Println("  --screenshot-engine go|wkhtml|chromium  PNG renderer (default: go)")
@@ -257,6 +260,27 @@ func main() {
 		fmt.Fprintf(os.Stderr, "failed to write manifest: %v\n", err)
 	}
 
+	inputSHA := ""
+	if inviteView != "" || findingsJSON {
+		if inputSHA, err = fileSHA256(icsPath); err != nil {
+			fmt.Fprintf(os.Stderr, "hash input: %v\n", err)
+		}
+	}
+
+	findingsPath := ""
+	if findingsJSON {
+		p := filepath.Join(outDir, "ics-ics-baby-findings.json")
+		b, err := json.MarshalIndent(icsparse.FindingsDoc(cal, inputSHA), "", "  ")
+		if err == nil {
+			err = os.WriteFile(p, append(b, '\n'), 0o644)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to write findings: %v\n", err)
+		} else {
+			findingsPath = p
+		}
+	}
+
 	if htmlOut == "" {
 		htmlOut = filepath.Join(outDir, "ics-ics-baby-preview.html")
 	}
@@ -337,10 +361,13 @@ func main() {
 	owaFailed := false
 	var owaWritten []string
 	if inviteView == "owa" {
-		owaFailed, owaWritten = writeOWAView(cal, icsPath, outDir, width, chromiumOpts)
+		owaFailed, owaWritten = writeOWAView(cal, inputSHA, outDir, width, chromiumOpts)
 	}
 
 	fmt.Println("Wrote manifest:", manifestPath)
+	if findingsPath != "" {
+		fmt.Println("Wrote findings:", findingsPath)
+	}
 	fmt.Println("Wrote HTML preview:", htmlOut)
 	if !previewFailed {
 		fmt.Println("Wrote PNG screenshot:", screenshot)
@@ -356,15 +383,11 @@ func main() {
 // writeOWAView writes the OWA HTML, renders its PNG with Chromium and then
 // writes the sidecar, which records the render outcome. It returns whether a
 // requested step failed and the "Wrote ..." lines for files that exist.
-func writeOWAView(cal *icsparse.CalendarInfo, icsPath, outDir string, width int, opts render.ChromiumSettings) (failed bool, wrote []string) {
+func writeOWAView(cal *icsparse.CalendarInfo, inputSHA, outDir string, width int, opts render.ChromiumSettings) (failed bool, wrote []string) {
 	htmlPath := filepath.Join(outDir, clientview.OWAHTMLName)
 	sidecarPath := filepath.Join(outDir, clientview.OWASidecarName)
 	pngPath := filepath.Join(outDir, clientview.OWAPNGName)
 
-	inputSHA, err := fileSHA256(icsPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "owa view: hash input: %v\n", err)
-	}
 	sc, err := clientview.WriteOWA(cal, inputSHA, outDir)
 	htmlOK := err == nil
 	if err != nil {

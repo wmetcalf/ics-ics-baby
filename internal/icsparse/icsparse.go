@@ -88,6 +88,8 @@ type EventInfo struct {
 	AltDescRaw *string `json:"-"`
 	// AltDescFmtType is that X-ALT-DESC's FMTTYPE parameter, lower-cased.
 	AltDescFmtType *string `json:"-"`
+	// Findings are the stable-coded forms of this event's alert strings.
+	Findings []Finding `json:"-"`
 }
 
 type CalendarInfo struct {
@@ -113,6 +115,8 @@ type CalendarInfo struct {
 	Availabilities        []AvailabilityInfo     `json:"availabilities,omitempty"`
 	Journals              []JournalInfo          `json:"journals,omitempty"`
 	AutoprocessingSignals *AutoprocessingSignals `json:"autoprocessing_signals,omitempty"`
+	// Findings are the stable-coded forms of the calendar-level alert strings.
+	Findings []Finding `json:"-"`
 }
 
 func (c *CalendarInfo) Manifest() map[string]any {
@@ -2424,6 +2428,10 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 		GoogleHeaders:      make(map[string]string),
 		SuspiciousPatterns: []string{},
 	}
+	alert := &alertSink{signals: signals}
+	if ev.UID != nil {
+		alert.uid = *ev.UID
+	}
 
 	// Note: Calendar-level vendor properties are handled separately in analyzeCalendarAutoprocessingSignals
 	// But we store them here too for combination detection
@@ -2446,7 +2454,7 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 			sentByEmail := *signals.OrganizerDetails.SentBy
 			if orgEmail != sentByEmail {
 				signals.HasSentByMismatch = true
-				signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				alert.add("organizer_sent_by_mismatch", kv{"organizer": orgEmail, "sent_by": sentByEmail},
 					fmt.Sprintf("ORGANIZER SENT-BY mismatch: organizer=%s, sent-by=%s", orgEmail, sentByEmail))
 			}
 		}
@@ -2455,7 +2463,7 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 	// Check for high sequence number (potential meeting hijacking)
 	if ev.Sequence != nil && *ev.Sequence > 10 {
 		signals.HasHighSequence = true
-		signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+		alert.add("high_sequence", kv{"sequence": fmt.Sprint(*ev.Sequence)},
 			fmt.Sprintf("High SEQUENCE value (%d) may indicate meeting update hijacking", *ev.Sequence))
 	}
 
@@ -2479,7 +2487,7 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 		// Also check for open redirect patterns in the location URL
 		hasRedirectPatterns := false
 		for _, pattern := range detectOpenRedirectPatterns(*ev.Location) {
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("location_open_redirect", kv{"location": *ev.Location, "pattern": pattern},
 				fmt.Sprintf("Open redirect in LOCATION: %s - %s", *ev.Location, pattern))
 			hasRedirectPatterns = true
 		}
@@ -2488,7 +2496,7 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 		if !allLegit || hasRedirectPatterns {
 			if !hasRedirectPatterns {
 				// Only add the generic warning if we haven't already added redirect warnings
-				signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				alert.add("location_url", kv{"location": *ev.Location},
 					fmt.Sprintf("URL in LOCATION field: %s - verify this is a legitimate meeting link", *ev.Location))
 			}
 		}
@@ -2521,17 +2529,17 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 				// Only flag ACCEPTED/TENTATIVE on ORIGINAL invitations (SEQUENCE=0)
 				// Updates (SEQUENCE>0) legitimately preserve attendees' previous responses
 				if partstat == "ACCEPTED" && !isOrganizer && isOriginalInvite {
-					signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+					alert.add("auto_accept_spoof", kv{"attendee": attendee.Mailto},
 						fmt.Sprintf("Auto-accept spoofing: PARTSTAT=ACCEPTED on incoming REQUEST for %s", attendee.Mailto))
 					signals.HasSentByMismatch = true // Mark as critical
 				} else if partstat == "TENTATIVE" && !isOrganizer && isOriginalInvite {
-					signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+					alert.add("auto_tentative_spoof", kv{"attendee": attendee.Mailto},
 						fmt.Sprintf("Auto-tentative spoofing: PARTSTAT=TENTATIVE on incoming REQUEST for %s", attendee.Mailto))
 				}
 			}
 			// Check for RSVP=FALSE on incoming invites (response suppression)
 			if attendee.RSVP != nil && strings.ToUpper(*attendee.RSVP) == "FALSE" {
-				signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				alert.add("rsvp_suppressed", kv{"attendee": attendee.Mailto},
 					"RSVP=FALSE on incoming REQUEST - response suppression detected")
 			}
 		}
@@ -2545,7 +2553,7 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 			status := strings.ToUpper(*ev.Status)
 			// STATUS:CONFIRMED removed - too common in legitimate calendars
 			if status == "TENTATIVE" {
-				signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				alert.add("status_tentative", kv{"status": *ev.Status},
 					"STATUS:TENTATIVE on incoming REQUEST - event appears pre-acknowledged (less common, verify legitimacy)")
 			}
 		}
@@ -2566,15 +2574,15 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 			}
 		}
 		if len(ev.Alarms) > 3 {
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("alarm_spam", kv{"count": fmt.Sprint(len(ev.Alarms))},
 				fmt.Sprintf("Multiple alarms (%d) - potential notification spam", len(ev.Alarms)))
 		}
 		if absoluteTimeAlarms > 0 {
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("absolute_alarm", kv{"count": fmt.Sprint(absoluteTimeAlarms)},
 				fmt.Sprintf("Absolute-time alarm trigger(s) (%d) - attacker-controlled notification timing", absoluteTimeAlarms))
 		}
 		if displayAlarms > 0 && calMethod != nil && strings.ToUpper(*calMethod) == "REQUEST" {
-			signals.InformationalPatterns = append(signals.InformationalPatterns,
+			alert.add("display_alarm", kv{"count": fmt.Sprint(displayAlarms)},
 				fmt.Sprintf("DISPLAY alarm(s) (%d) - popup notifications will appear before meeting", displayAlarms))
 		}
 	}
@@ -2583,7 +2591,7 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 	if ev.DTStart != nil && ev.DTEnd != nil {
 		duration := ev.DTEnd.Sub(*ev.DTStart)
 		if duration < 5*time.Minute && duration > 0 {
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("short_duration", kv{"duration": duration.String()},
 				fmt.Sprintf("Very short event duration (%v) - minimal visibility spam", duration))
 		}
 	}
@@ -2592,7 +2600,7 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 	if ev.Class != nil {
 		class := strings.ToUpper(*ev.Class)
 		if class == "PRIVATE" || class == "CONFIDENTIAL" {
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("class_sensitive", kv{"class": class},
 				fmt.Sprintf("CLASS:%s - event marked as sensitive (may reduce scrutiny or affect sharing/visibility)", class))
 		}
 	}
@@ -2602,11 +2610,11 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 		priority := *ev.Priority
 		// Priority 1 = highest, 9 = lowest, 0 = undefined per RFC 5545
 		if priority == 1 {
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("priority_urgency", kv{"priority": "1"},
 				"PRIORITY:1 (Highest) - urgency manipulation to prompt immediate action")
 		} else if priority >= 2 && priority <= 4 {
 			// PRIORITY 2-4 is common in legitimate meetings (conference calls, important meetings)
-			signals.InformationalPatterns = append(signals.InformationalPatterns,
+			alert.add("priority_high", kv{"priority": fmt.Sprint(priority)},
 				fmt.Sprintf("PRIORITY:%d (High) - meeting marked with elevated priority", priority))
 		}
 	}
@@ -2633,7 +2641,7 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 	// Check for urgency spoofing via Microsoft importance
 	if importance, ok := signals.MicrosoftHeaders["X-MICROSOFT-CDO-IMPORTANCE"]; ok {
 		if importance == "2" {
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("importance_spoof", kv{"header": "X-MICROSOFT-CDO-IMPORTANCE", "value": importance},
 				"High priority/importance spoofing via X-MICROSOFT-CDO-IMPORTANCE:2")
 		}
 	}
@@ -2643,7 +2651,7 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 		if strings.ToUpper(hasAttach) == "YES" {
 			// Check if there are actual attachments
 			if len(ev.Attachments) == 0 {
-				signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				alert.add("fake_attachment_flag", kv{"header": "X-MS-HAS-ATTACH", "value": hasAttach},
 					"Fake attachment indicator: X-MS-Has-Attach:YES without actual attachments")
 			}
 		}
@@ -2652,37 +2660,37 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 	// Check for response suppression
 	if isResponseRequested, ok := signals.MicrosoftHeaders["X-MICROSOFT-ISRESPONSEREQUESTED"]; ok {
 		if strings.ToUpper(isResponseRequested) == "FALSE" {
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("response_suppressed", kv{"header": "X-MICROSOFT-ISRESPONSEREQUESTED", "value": isResponseRequested},
 				"Response suppression: X-MICROSOFT-ISRESPONSEREQUESTED:FALSE")
 		}
 	}
 
 	// Note common Microsoft headers (informational, not necessarily suspicious)
 	if busyStatus, ok := signals.MicrosoftHeaders["X-MICROSOFT-CDO-BUSYSTATUS"]; ok {
-		signals.InformationalPatterns = append(signals.InformationalPatterns,
+		alert.add("ms_busy_status", kv{"header": "X-MICROSOFT-CDO-BUSYSTATUS", "value": busyStatus},
 			fmt.Sprintf("Microsoft busy/free status: X-MICROSOFT-CDO-BUSYSTATUS=%s", busyStatus))
 	}
 
 	if intendedStatus, ok := signals.MicrosoftHeaders["X-MICROSOFT-CDO-INTENDEDSTATUS"]; ok {
-		signals.InformationalPatterns = append(signals.InformationalPatterns,
+		alert.add("ms_intended_status", kv{"header": "X-MICROSOFT-CDO-INTENDEDSTATUS", "value": intendedStatus},
 			fmt.Sprintf("Microsoft intended status: X-MICROSOFT-CDO-INTENDEDSTATUS=%s", intendedStatus))
 	}
 
 	if forceInspector, ok := signals.MicrosoftHeaders["X-MS-OLK-FORCEINSPECTOROPEN"]; ok {
 		if strings.ToUpper(forceInspector) == "TRUE" {
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("force_inspector_open", kv{"header": "X-MS-OLK-FORCEINSPECTOROPEN", "value": forceInspector},
 				"Force Inspector Open: X-MS-OLK-FORCEINSPECTOROPEN=TRUE (forces Outlook to open in full window, can bypass quick preview security)")
 		}
 	}
 
 	if apptSeq, ok := signals.MicrosoftHeaders["X-MS-OLK-APPTLASTSEQUENCE"]; ok {
-		signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+		alert.add("appt_sequence_override", kv{"header": "X-MS-OLK-APPTLASTSEQUENCE", "value": apptSeq},
 			fmt.Sprintf("Appointment sequence manipulation: X-MS-OLK-APPTLASTSEQUENCE=%s (can be used to override legitimate meeting updates)", apptSeq))
 	}
 
 	if allDay, ok := signals.MicrosoftHeaders["X-MICROSOFT-CDO-ALLDAYEVENT"]; ok {
 		if strings.ToUpper(allDay) == "TRUE" {
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("all_day_flag", kv{"header": "X-MICROSOFT-CDO-ALLDAYEVENT", "value": allDay},
 				"All-day event flag: X-MICROSOFT-CDO-ALLDAYEVENT=TRUE (all-day events may have less scrutiny or different display behavior)")
 		}
 	}
@@ -2695,13 +2703,13 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 		isLegitTeamsURL := strings.HasPrefix(lowerTeamsURL, "https://teams.microsoft.com/l/meetup-join/")
 
 		if !isLegitTeamsURL {
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("teams_url_hijack", kv{"url": teamsURL},
 				fmt.Sprintf("⚠️ TEAMS URL HIJACKING: X-MICROSOFT-SKYPETEAMSMEETINGURL=%s - Outlook renders as clickable 'Join Teams Meeting' button without validation (expected teams.microsoft.com, got non-Teams URL)", teamsURL))
 		}
 
 		// Always check for open redirect patterns, even in legitimate domains
 		for _, pattern := range detectOpenRedirectPatterns(teamsURL) {
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("teams_open_redirect", kv{"url": teamsURL, "pattern": pattern},
 				fmt.Sprintf("Open redirect in Teams URL: %s", pattern))
 		}
 		// Extract redirect target
@@ -2736,7 +2744,7 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 
 			// Only flag unusual Teams/Meeting headers
 			if strings.Contains(strings.ToUpper(key), "MEETING") || strings.Contains(strings.ToUpper(key), "TEAMS") {
-				signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				alert.add("unusual_teams_header", kv{"header": key, "value": val},
 					fmt.Sprintf("Unusual Microsoft Teams meeting header: %s", key))
 			}
 
@@ -2761,13 +2769,13 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 				}
 
 				if !isLocationsWithLegitURL {
-					signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+					alert.add("ms_header_url", kv{"header": key, "value": val},
 						fmt.Sprintf("URL in Microsoft header %s: %s", key, val))
 				}
 
 				// Check for open redirect patterns
 				for _, pattern := range detectOpenRedirectPatterns(val) {
-					signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+					alert.add("ms_header_open_redirect", kv{"header": key, "value": val, "pattern": pattern},
 						fmt.Sprintf("Open redirect in %s: %s", key, pattern))
 				}
 				// Extract redirect target
@@ -2786,7 +2794,7 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 					// Legitimate Google Meet URL - don't flag
 					continue
 				}
-				signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				alert.add("google_conference_nonstandard", kv{"header": key, "value": val},
 					fmt.Sprintf("Google Meet conference header with non-standard URL: %s", key))
 			}
 			if strings.Contains(val, "http") {
@@ -2795,10 +2803,10 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 				// Google's own open redirects (like docs.google.com/open) to redirect to malicious sites
 				redirectPatterns := detectOpenRedirectPatterns(val)
 				if len(redirectPatterns) > 0 {
-					signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+					alert.add("google_header_url", kv{"header": key, "value": val},
 						fmt.Sprintf("URL in Google header %s: %s", key, val))
 					for _, pattern := range redirectPatterns {
-						signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+						alert.add("google_trusted_domain_bypass", kv{"header": key, "value": val, "pattern": pattern},
 							fmt.Sprintf("⚠️ TRUSTED DOMAIN BYPASS: %s - Google Calendar trusts google.com, allowing redirect chain to attacker", pattern))
 					}
 					// Extract redirect target
@@ -2813,7 +2821,7 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 	// Check discovered URLs for open redirect patterns
 	for _, discoveredURL := range ev.DiscoveredURLs {
 		for _, pattern := range detectOpenRedirectPatterns(discoveredURL) {
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("discovered_url_open_redirect", kv{"url": discoveredURL, "pattern": pattern},
 				fmt.Sprintf("Open redirect in discovered URL (%s): %s", discoveredURL, pattern))
 		}
 		// Extract redirect target
@@ -2853,7 +2861,7 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 	}
 
 	if hasPreAccepted && (hasURLHijacking || hasOpenRedirect) {
-		signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+		alert.add("combo_preaccepted_malicious_url", nil,
 			"🚨 CRITICAL COMBINATION: Pre-accepted meeting with malicious URL - meeting appears already accepted with hijacked meeting link (extremely suspicious)")
 	}
 
@@ -2880,7 +2888,7 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 	}
 
 	if hasPreAccepted && hasResponseSuppression && hasHighPriority {
-		signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+		alert.add("combo_preaccepted_stealth", nil,
 			"🚨 CRITICAL COMBINATION: Pre-accepted + response suppression + high priority - urgent stealthy meeting that victim cannot RSVP to (strong phishing indicator)")
 	}
 
@@ -2889,7 +2897,7 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 	alarmCount := len(ev.Alarms)
 
 	if alarmCount > 3 {
-		signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+		alert.add("combo_alarm_spam", kv{"count": fmt.Sprint(alarmCount)},
 			fmt.Sprintf("🚨 CRITICAL COMBINATION: %d alarms detected - notification spam attack (especially suspicious with short duration events)", alarmCount))
 	}
 
@@ -2897,6 +2905,7 @@ func analyzeAutoprocessingSignals(ev *EventInfo, organizerParams map[string]stri
 	if signals.HasHighSequence || signals.HasSentByMismatch || len(signals.SuspiciousPatterns) > 0 ||
 		len(signals.MicrosoftHeaders) > 0 || len(signals.GoogleHeaders) > 0 {
 		ev.AutoprocessingSignals = signals
+		ev.Findings = alert.findings
 	}
 }
 
@@ -2907,6 +2916,7 @@ func analyzeCalendarAutoprocessingSignals(cal *CalendarInfo, calLevelProps map[s
 		GoogleHeaders:      make(map[string]string),
 		SuspiciousPatterns: []string{},
 	}
+	alert := &alertSink{signals: signals}
 
 	// Capture calendar-level vendor properties
 	if calLevelProps != nil {
@@ -2925,13 +2935,13 @@ func analyzeCalendarAutoprocessingSignals(cal *CalendarInfo, calLevelProps map[s
 		method := strings.ToUpper(*cal.Method)
 		switch method {
 		case "CANCEL":
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("method_cancel", kv{"method": method},
 				"Calendar METHOD:CANCEL - may attempt to remove legitimate meetings")
 		case "REPLY":
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("method_reply", kv{"method": method},
 				"Calendar METHOD:REPLY - verify this is from expected attendee")
 		case "PUBLISH":
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("method_publish", kv{"method": method},
 				"Calendar METHOD:PUBLISH - auto-subscription risk without user consent")
 		}
 	}
@@ -2940,7 +2950,7 @@ func analyzeCalendarAutoprocessingSignals(cal *CalendarInfo, calLevelProps map[s
 	if busyStatus, ok := signals.MicrosoftHeaders["X-MICROSOFT-CDO-BUSYSTATUS"]; ok {
 		status := strings.ToUpper(busyStatus)
 		if status == "OOF" || status == "BUSY" || status == "TENTATIVE" {
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("busy_status_spoof", kv{"header": "X-MICROSOFT-CDO-BUSYSTATUS", "value": busyStatus},
 				fmt.Sprintf("Busy status manipulation: X-MICROSOFT-CDO-BUSYSTATUS:%s - may spoof recipient availability", busyStatus))
 		}
 	}
@@ -2948,7 +2958,7 @@ func analyzeCalendarAutoprocessingSignals(cal *CalendarInfo, calLevelProps map[s
 	// Check for high importance/priority spoofing
 	if importance, ok := signals.MicrosoftHeaders["X-MICROSOFT-CDO-IMPORTANCE"]; ok {
 		if importance == "2" {
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("importance_spoof", kv{"header": "X-MICROSOFT-CDO-IMPORTANCE", "value": importance},
 				"High priority/importance spoofing via X-MICROSOFT-CDO-IMPORTANCE:2")
 		}
 	}
@@ -2956,7 +2966,7 @@ func analyzeCalendarAutoprocessingSignals(cal *CalendarInfo, calLevelProps map[s
 	// Check for fake attachment indicator at calendar level
 	if hasAttach, ok := signals.MicrosoftHeaders["X-MS-HAS-ATTACH"]; ok {
 		if strings.ToUpper(hasAttach) == "YES" {
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("calendar_attachment_flag", kv{"header": "X-MS-HAS-ATTACH", "value": hasAttach},
 				"Attachment indicator at calendar level: X-MS-Has-Attach:YES")
 		}
 	}
@@ -2964,7 +2974,7 @@ func analyzeCalendarAutoprocessingSignals(cal *CalendarInfo, calLevelProps map[s
 	// Check for response suppression at calendar level
 	if isResponseRequested, ok := signals.MicrosoftHeaders["X-MICROSOFT-ISRESPONSEREQUESTED"]; ok {
 		if strings.ToUpper(isResponseRequested) == "FALSE" {
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("response_suppressed", kv{"header": "X-MICROSOFT-ISRESPONSEREQUESTED", "value": isResponseRequested},
 				"Response suppression: X-MICROSOFT-ISRESPONSEREQUESTED:FALSE")
 		}
 	}
@@ -2972,18 +2982,18 @@ func analyzeCalendarAutoprocessingSignals(cal *CalendarInfo, calLevelProps map[s
 	// Explain calendar-level Microsoft headers
 	if forceInspector, ok := signals.MicrosoftHeaders["X-MS-OLK-FORCEINSPECTOROPEN"]; ok {
 		if strings.ToUpper(forceInspector) == "TRUE" {
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("force_inspector_open", kv{"header": "X-MS-OLK-FORCEINSPECTOROPEN", "value": forceInspector},
 				"Force Inspector Open: X-MS-OLK-FORCEINSPECTOROPEN=TRUE (forces Outlook to open in full window, can bypass quick preview security)")
 		}
 	}
 
 	if intendedStatus, ok := signals.MicrosoftHeaders["X-MICROSOFT-CDO-INTENDEDSTATUS"]; ok {
-		signals.InformationalPatterns = append(signals.InformationalPatterns,
+		alert.add("calendar_intended_status", kv{"header": "X-MICROSOFT-CDO-INTENDEDSTATUS", "value": intendedStatus},
 			fmt.Sprintf("Microsoft intended status at calendar level: X-MICROSOFT-CDO-INTENDEDSTATUS=%s", intendedStatus))
 	}
 
 	if apptSeq, ok := signals.MicrosoftHeaders["X-MS-OLK-APPTLASTSEQUENCE"]; ok {
-		signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+		alert.add("calendar_appt_sequence", kv{"header": "X-MS-OLK-APPTLASTSEQUENCE", "value": apptSeq},
 			fmt.Sprintf("Appointment sequence at calendar level: X-MS-OLK-APPTLASTSEQUENCE=%s", apptSeq))
 	}
 
@@ -2995,13 +3005,13 @@ func analyzeCalendarAutoprocessingSignals(cal *CalendarInfo, calLevelProps map[s
 		isLegitTeamsURL := strings.HasPrefix(lowerTeamsURL, "https://teams.microsoft.com/l/meetup-join/")
 
 		if !isLegitTeamsURL {
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("teams_url_hijack", kv{"url": teamsURL},
 				fmt.Sprintf("⚠️ TEAMS URL HIJACKING: X-MICROSOFT-SKYPETEAMSMEETINGURL=%s - Outlook renders as clickable 'Join Teams Meeting' button without validation (expected teams.microsoft.com, got non-Teams URL)", teamsURL))
 		}
 
 		// Always check for open redirect patterns, even in legitimate domains
 		for _, pattern := range detectOpenRedirectPatterns(teamsURL) {
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("teams_open_redirect", kv{"url": teamsURL, "pattern": pattern},
 				fmt.Sprintf("Open redirect in Teams URL: %s", pattern))
 		}
 		// Extract redirect target
@@ -3018,17 +3028,17 @@ func analyzeCalendarAutoprocessingSignals(cal *CalendarInfo, calLevelProps map[s
 				// Legitimate Google Meet URL - don't flag
 				continue
 			}
-			signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+			alert.add("google_conference_nonstandard", kv{"header": key, "value": val},
 				fmt.Sprintf("Google Meet conference header with non-standard URL: %s", key))
 		}
 		if strings.Contains(val, "http") {
 			// Check for open redirect patterns (Tarlogic bypass chain: Meet → Docs → attacker)
 			redirectPatterns := detectOpenRedirectPatterns(val)
 			if len(redirectPatterns) > 0 {
-				signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+				alert.add("google_header_url", kv{"header": key, "value": val},
 					fmt.Sprintf("URL in Google header %s: %s", key, val))
 				for _, pattern := range redirectPatterns {
-					signals.SuspiciousPatterns = append(signals.SuspiciousPatterns,
+					alert.add("google_trusted_domain_bypass", kv{"header": key, "value": val, "pattern": pattern},
 						fmt.Sprintf("⚠️ TRUSTED DOMAIN BYPASS: %s - Google Calendar trusts google.com, allowing redirect chain to attacker", pattern))
 				}
 			}
@@ -3038,5 +3048,6 @@ func analyzeCalendarAutoprocessingSignals(cal *CalendarInfo, calLevelProps map[s
 	// Only attach if there are patterns or headers to report
 	if len(signals.SuspiciousPatterns) > 0 || len(signals.MicrosoftHeaders) > 0 || len(signals.GoogleHeaders) > 0 {
 		cal.AutoprocessingSignals = signals
+		cal.Findings = alert.findings
 	}
 }

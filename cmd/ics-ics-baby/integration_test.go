@@ -522,3 +522,37 @@ func TestCLIInviteViewOrder(t *testing.T) {
 		t.Fatal("claimed a preview PNG that failed to render")
 	}
 }
+
+func TestCLIFindingsJSON(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "o")
+	res := runCLI(t, "--out", out, "--findings-json", fixtureDir+"09-combo-spoof-urgent.ics")
+	if res.exit != 0 {
+		t.Fatalf("exit %d: %s", res.exit, res.stderr)
+	}
+	b, err := os.ReadFile(filepath.Join(out, "ics-ics-baby-findings.json"))
+	if err != nil {
+		t.Fatalf("findings file: %v", err)
+	}
+	var doc struct {
+		Schema   string           `json:"schema_version"`
+		SHA      string           `json:"input_sha256"`
+		Findings []map[string]any `json:"findings"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Schema != "ics-ics-baby-findings/1" || len(doc.SHA) != 64 || len(doc.Findings) == 0 {
+		t.Fatalf("doc = %+v", doc)
+	}
+	if !strings.Contains(res.stdout, "Wrote findings:") {
+		t.Fatalf("stdout: %s", res.stdout)
+	}
+
+	out2 := filepath.Join(t.TempDir(), "o")
+	if r := runCLI(t, "--out", out2, fixtureDir+"09-combo-spoof-urgent.ics"); r.exit != 0 {
+		t.Fatalf("exit %d", r.exit)
+	}
+	if fileExists(filepath.Join(out2, "ics-ics-baby-findings.json")) {
+		t.Fatal("findings written without --findings-json")
+	}
+}
