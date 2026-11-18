@@ -481,7 +481,7 @@ func TestSVGPresentationURLRecorded(t *testing.T) {
 	if strings.Contains(res.HTML, "evil.test") {
 		t.Fatalf("remote url() survived: %s", res.HTML)
 	}
-	if !strings.Contains(res.HTML, `fill="url(#grad)"`) {
+	if !strings.Contains(res.HTML, `fill="url(#x_grad)"`) {
 		t.Fatalf("fragment url() lost: %s", res.HTML)
 	}
 	if len(res.RemoteRefs) != 1 || res.RemoteRefs[0].Host != "evil.test" {
@@ -790,4 +790,17 @@ func TestSanitizeRound5(t *testing.T) {
 			t.Fatalf("took %v", d)
 		}
 	})
+}
+
+// Ids get the x_ prefix, so in-document references must follow it.
+func TestFragmentRefsFollowIDPrefix(t *testing.T) {
+	res, err := OWASanitize(`<svg><linearGradient id="grad"></linearGradient><rect fill="url(#grad)" style="mask:url('#m')"></rect><a href="#top">t</a></svg><p><a href="#sec">jump</a></p>`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`id="x_grad"`, `fill="url(#x_grad)"`, `mask:url(&#39;#x_m&#39;)`, `href="#x_top"`, `href="#x_sec"`} {
+		if !strings.Contains(res.HTML, want) {
+			t.Errorf("missing %s in %s", want, res.HTML)
+		}
+	}
 }

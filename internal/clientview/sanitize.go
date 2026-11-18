@@ -1002,6 +1002,9 @@ func (s *sanitizer) attrs(n *html.Node, tag string) {
 				s.drop("attr:" + key + ":url")
 				continue
 			}
+			if n.Namespace != "" {
+				a.Val = fragmentURL.ReplaceAllString(a.Val, "${1}#x_")
+			}
 		}
 		kept = append(kept, a)
 	}
@@ -1068,9 +1071,11 @@ func (s *sanitizer) href(n *html.Node, tag string, a *html.Attribute) bool {
 			s.addRef(s.classify(v))
 			return false
 		}
+		a.Val = prefixFragment(v)
 		return true
 	}
 	if v == "" || strings.HasPrefix(v, "#") {
+		a.Val = prefixFragment(v)
 		return true
 	}
 	host := ""
@@ -1264,6 +1269,17 @@ func (s *sanitizer) inlineImage(raw string) (RemoteRef, bool) {
 // ---------------------------------------------------------------------------
 // CSS
 // ---------------------------------------------------------------------------
+
+// fragmentURL matches the start of url(#...) / url("#...") / url('#...').
+var fragmentURL = regexp.MustCompile(`(?i)(url\(\s*["']?)#`)
+
+// prefixFragment rewrites "#name" to "#x_name", matching the x_ id prefix.
+func prefixFragment(v string) string {
+	if len(v) > 1 && v[0] == '#' {
+		return "#x_" + v[1:]
+	}
+	return v
+}
 
 // safeMedia is a media query list made of plain tokens only.
 var safeMedia = regexp.MustCompile(`^[a-zA-Z0-9 ,:().\-]*$`)
@@ -1547,6 +1563,11 @@ func (s *sanitizer) declarations(body string) string {
 					return m
 				}
 				return "none"
+			}
+			if strings.HasPrefix(u, "#") && len(u) > 1 && !strings.ContainsAny(u, `"'()`) {
+				// An in-document reference (gradient, mask, filter): follow
+				// the x_ id prefix.
+				return "url('" + prefixFragment(u) + "')"
 			}
 			s.cssRef(u)
 			return "none"
