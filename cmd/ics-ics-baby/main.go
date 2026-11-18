@@ -87,6 +87,10 @@ func main() {
 	var wkhtmlArgs multiFlag
 	var wkhtmlAllowPath multiFlag
 	var hideSecurityAlerts bool
+	var chromiumBin string
+	var chromiumTimeout time.Duration
+	var chromiumNoSandbox bool
+	var chromiumMaxHeight int
 
 	flag.StringVar(&outDir, "out", "out", "Output directory")
 	flag.StringVar(&screenshot, "screenshot", "", "Output PNG path (default: OUT/preview.png)")
@@ -100,13 +104,17 @@ func main() {
 	flag.StringVar(&style, "style", "light", "Render style: light or dark")
 	flag.IntVar(&width, "width", 1200, "PNG width in pixels")
 	flag.StringVar(&view, "view", "invite", "PNG view: invite or agenda")
-	flag.StringVar(&screenshotEngine, "screenshot-engine", "go", "PNG renderer: go or wkhtml")
+	flag.StringVar(&screenshotEngine, "screenshot-engine", "go", "PNG renderer: go, wkhtml or chromium")
 	flag.StringVar(&wkhtmlBin, "wkhtml-bin", "wkhtmltoimage", "Path to wkhtmltoimage binary")
 	flag.StringVar(&wkhtmlWrapBin, "wkhtml-wrap", "wkhtml-wrap", "Path to wkhtml-wrap sandbox binary (use empty string to disable sandbox)")
 	flag.BoolVar(&wkhtmlAllowNetwork, "wkhtml-allow-network", false, "Allow wkhtmltoimage to contact remote hosts (defaults to blocking via a dead proxy)")
 	flag.DurationVar(&wkhtmlTimeout, "wkhtml-timeout", 45*time.Second, "Timeout for wkhtmltoimage execution")
 	flag.Var(&wkhtmlArgs, "wkhtml-arg", "Additional argument passed straight to wkhtmltoimage (repeatable)")
 	flag.Var(&wkhtmlAllowPath, "wkhtml-allow-path", "Allow wkhtmltoimage to read this path when local file access is otherwise disabled (repeatable)")
+	flag.StringVar(&chromiumBin, "chromium-bin", "", "Path to headless Chromium (default: search PATH for chromium, chromium-browser, google-chrome, headless_shell)")
+	flag.DurationVar(&chromiumTimeout, "chromium-timeout", 45*time.Second, "Timeout for each headless Chromium render")
+	flag.BoolVar(&chromiumNoSandbox, "chromium-no-sandbox", false, "Disable the Chromium sandbox (only for containers that cannot provide it)")
+	flag.IntVar(&chromiumMaxHeight, "chromium-max-height", 20000, "Maximum Chromium capture height in pixels")
 	flag.BoolVar(&hideSecurityAlerts, "hide-security-alerts", false, "Hide security alert warnings in HTML/PNG output (default: show alerts)")
 
 	flag.Parse()
@@ -142,13 +150,17 @@ func main() {
 		fmt.Println("  --max-attachment-bytes N        Maximum size per attachment in bytes (default: 100 MiB)")
 		fmt.Println("  --max-ics-bytes N               Maximum ICS file size in bytes (default: 500 MiB)")
 		fmt.Println("\nScreenshot engine options:")
-		fmt.Println("  --screenshot-engine go|wkhtml   PNG renderer (default: go)")
+		fmt.Println("  --screenshot-engine go|wkhtml|chromium  PNG renderer (default: go)")
 		fmt.Println("  --wkhtml-bin PATH               Path to wkhtmltoimage binary (default: wkhtmltoimage)")
 		fmt.Println("  --wkhtml-wrap PATH              Path to wkhtml-wrap sandbox binary (default: wkhtml-wrap)")
 		fmt.Println("  --wkhtml-allow-network          Allow wkhtmltoimage network access (default: blocked)")
 		fmt.Println("  --wkhtml-timeout DURATION       Timeout for wkhtmltoimage (default: 45s)")
 		fmt.Println("  --wkhtml-arg ARG                Additional wkhtmltoimage argument (repeatable)")
 		fmt.Println("  --wkhtml-allow-path PATH        Allow wkhtmltoimage to read this path (repeatable)")
+		fmt.Println("  --chromium-bin PATH             Headless Chromium binary (default: search PATH)")
+		fmt.Println("  --chromium-timeout DURATION     Timeout per Chromium render (default: 45s)")
+		fmt.Println("  --chromium-no-sandbox           Disable the Chromium sandbox (containers only)")
+		fmt.Println("  --chromium-max-height N         Maximum Chromium capture height (default: 20000)")
 		fmt.Println("\nExamples:")
 		fmt.Println("  # Basic usage with defaults")
 		fmt.Println("  ics-ics-baby meeting.ics")
@@ -259,9 +271,25 @@ func main() {
 	}
 	screenshot = sanitizedScreenshot
 
+	chromiumOpts := render.ChromiumSettings{
+		Bin:       chromiumBin,
+		Timeout:   chromiumTimeout,
+		NoSandbox: chromiumNoSandbox,
+		MaxHeight: chromiumMaxHeight,
+	}
+
 	switch view {
 	case "invite":
-		if screenshotEngine == "wkhtml" {
+		if screenshotEngine == "chromium" {
+			blocked, err := render.RenderHTMLWithChromium(htmlOut, screenshot, width, chromiumOpts)
+			for _, u := range blocked {
+				fmt.Fprintf(os.Stderr, "[chromium] blocked: %s\n", u)
+			}
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "chromium render error: %v\n", err)
+				os.Exit(1)
+			}
+		} else if screenshotEngine == "wkhtml" {
 			opts := render.WKHTMLSettings{
 				Bin:          wkhtmlBin,
 				WrapperBin:   wkhtmlWrapBin,

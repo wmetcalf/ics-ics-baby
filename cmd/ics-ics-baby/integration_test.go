@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"ics-ics-baby/internal/render"
 )
 
 // TestICSProcessingIntegration tests end-to-end ICS file processing
@@ -330,4 +332,57 @@ func loadPNG(path string) (image.Image, error) {
 
 	img, _, err := image.Decode(f)
 	return img, err
+}
+
+const fixtureDir = "../../ics-parser-test-suite/ics_files/"
+
+func requireChromiumCLI(t *testing.T) {
+	t.Helper()
+	if _, err := render.FindChromium(""); err != nil {
+		t.Skipf("headless Chromium not available: %v", err)
+	}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func TestCLIChromiumEngine(t *testing.T) {
+	requireChromiumCLI(t)
+	fx := fixtureDir + "11-html-alt-desc.ics"
+	chromeOut := filepath.Join(t.TempDir(), "c")
+	res := runCLI(t, "--out", chromeOut, "--screenshot-engine", "chromium", fx)
+	if res.exit != 0 {
+		t.Fatalf("exit %d, stderr: %s", res.exit, res.stderr)
+	}
+	goOut := filepath.Join(t.TempDir(), "g")
+	if r := runCLI(t, "--out", goOut, fx); r.exit != 0 {
+		t.Fatalf("go engine exit %d", r.exit)
+	}
+	cpng := filepath.Join(chromeOut, "ics-ics-baby-preview.png")
+	if _, err := loadPNG(cpng); err != nil {
+		t.Fatalf("chromium PNG does not decode: %v", err)
+	}
+	a, _ := os.ReadFile(cpng)
+	b, _ := os.ReadFile(filepath.Join(goOut, "ics-ics-baby-preview.png"))
+	if string(a) == string(b) {
+		t.Fatal("chromium PNG identical to go PNG; chromium engine not used")
+	}
+}
+
+func TestCLIChromiumMissing(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "o")
+	res := runCLI(t, "--out", out, "--screenshot-engine", "chromium", "--chromium-bin", "/nonexistent", fixtureDir+"11-html-alt-desc.ics")
+	if res.exit != 1 {
+		t.Fatalf("exit = %d, want 1 (stderr %q)", res.exit, res.stderr)
+	}
+	if !strings.Contains(res.stderr, "chromium render error") {
+		t.Fatalf("stderr %q lacks 'chromium render error'", res.stderr)
+	}
+	for _, f := range []string{"ics-ics-baby-manifest.json", "ics-ics-baby-preview.html"} {
+		if !fileExists(filepath.Join(out, f)) {
+			t.Fatalf("%s missing after chromium failure", f)
+		}
+	}
 }
