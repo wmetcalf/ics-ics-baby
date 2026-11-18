@@ -354,3 +354,29 @@ func TestOWARenderedBodyInlineFirst(t *testing.T) {
 		t.Fatalf("rendered inline image lost: refs %+v dropped %v", sc.RemoteRefs, sc.Dropped)
 	}
 }
+
+// Multiple X-ALT-DESC parts: the last HTML part with visible content is
+// rendered and the evidence of every part is recorded.
+func TestOWAAltDescParts(t *testing.T) {
+	ics := func(props string) string {
+		return "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:p@test\r\nSUMMARY:x\r\n" + props + "END:VEVENT\r\nEND:VCALENDAR\r\n"
+	}
+	// plain first, then an image-only HTML part: the HTML part is shown.
+	sc, html, _ := writeOWA(t, parseICS(t, ics("X-ALT-DESC;FMTTYPE=text/plain:Please view in HTML.\r\n"+
+		`X-ALT-DESC;FMTTYPE=text/html:<center><img src="https://evil.example/qr.png" width=300 height=300></center>`+"\r\n")))
+	if !strings.Contains(html, "remote image: evil.example") || len(sc.RemoteRefs) != 1 {
+		t.Fatalf("image-only HTML part not rendered: refs %+v", sc.RemoteRefs)
+	}
+	// a trailing script-only part does not blank the body.
+	sc, html, _ = writeOWA(t, parseICS(t, ics("X-ALT-DESC;FMTTYPE=text/html:<p>Quarterly review agenda <a href=\"https://evil.example/x\">x</a></p>\r\n"+
+		"X-ALT-DESC;FMTTYPE=text/html:<script>x</script>\r\n")))
+	if !strings.Contains(html, "Quarterly review agenda") || len(sc.Links) != 1 {
+		t.Fatalf("body blanked: links %+v", sc.Links)
+	}
+	// an earlier part's references are recorded even when a later one shows.
+	sc, html, _ = writeOWA(t, parseICS(t, ics(`X-ALT-DESC;FMTTYPE=text/html:<img src="https://track.example/p.gif">`+"\r\n"+
+		"X-ALT-DESC;FMTTYPE=text/html:<p>Later text</p>\r\n")))
+	if !strings.Contains(html, "Later text") || len(sc.RemoteRefs) != 1 || sc.RemoteRefs[0].Host != "track.example" {
+		t.Fatalf("earlier part evidence lost: refs %+v", sc.RemoteRefs)
+	}
+}

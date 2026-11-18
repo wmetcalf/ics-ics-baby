@@ -64,18 +64,17 @@ func deref(s *string) string {
 	return *s
 }
 
-// The view's body follows the preview: a non-empty HTML X-ALT-DESC wins
-// over a plain or empty one, whichever comes first.
-func TestAltDescRawPrefersHTML(t *testing.T) {
-	for name, props := range map[string]string{
-		"plain first": "X-ALT-DESC;FMTTYPE=text/plain:See HTML version\r\nX-ALT-DESC;FMTTYPE=text/html:<a href=\"https://evil.example/p\">here</a>\r\n",
-		"empty first": "X-ALT-DESC;FMTTYPE=text/html: \r\nX-ALT-DESC;FMTTYPE=text/html:<a href=\"https://evil.example/p\">here</a>\r\n",
-	} {
-		cal := parseInline(t, "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:p@test\r\nSUMMARY:x\r\n"+props+"END:VEVENT\r\nEND:VCALENDAR\r\n")
-		ev := cal.Events[0]
-		if ev.AltDescRaw == nil || !strings.Contains(*ev.AltDescRaw, "evil.example") || ev.AltDescFmtType == nil || *ev.AltDescFmtType != "text/html" {
-			t.Fatalf("%s: AltDescRaw = %q (%q)", name, deref(ev.AltDescRaw), deref(ev.AltDescFmtType))
-		}
+// Every non-empty FMTTYPE=text/html X-ALT-DESC is kept for the view.
+func TestAltDescHTMLParts(t *testing.T) {
+	cal := parseInline(t, "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:p@test\r\nSUMMARY:x\r\n"+
+		"X-ALT-DESC;FMTTYPE=text/plain:See HTML version\r\nX-ALT-DESC;FMTTYPE=text/html: \r\n"+
+		"X-ALT-DESC;FMTTYPE=text/html:<a href=\"https://evil.example/p\">here</a>\r\nX-ALT-DESC;FMTTYPE=TEXT/HTML:<script>x</script>\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
+	ev := cal.Events[0]
+	if len(ev.AltDescHTMLParts) != 2 || !strings.Contains(ev.AltDescHTMLParts[0], "evil.example") {
+		t.Fatalf("parts = %q", ev.AltDescHTMLParts)
+	}
+	if ev.AltDescRaw == nil || *ev.AltDescRaw != "See HTML version" {
+		t.Fatalf("AltDescRaw = %q", deref(ev.AltDescRaw))
 	}
 }
 
@@ -86,15 +85,5 @@ func TestOrganizerCNWithoutSignals(t *testing.T) {
 	ev := cal.Events[0]
 	if ev.OrganizerCN == nil || *ev.OrganizerCN != "Microsoft Security Team" {
 		t.Fatalf("OrganizerCN = %q", deref(ev.OrganizerCN))
-	}
-}
-
-// A trailing HTML part that sanitizes to nothing does not replace the body
-// the preview shows.
-func TestAltDescRawFollowsPreview(t *testing.T) {
-	cal := parseInline(t, "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:q@test\r\nSUMMARY:x\r\n"+
-		"X-ALT-DESC;FMTTYPE=text/html:<p>Quarterly review agenda</p>\r\nX-ALT-DESC;FMTTYPE=text/html:<script>x</script>\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
-	if ev := cal.Events[0]; ev.AltDescRaw == nil || !strings.Contains(*ev.AltDescRaw, "Quarterly review agenda") {
-		t.Fatalf("AltDescRaw = %q", deref(ev.AltDescRaw))
 	}
 }

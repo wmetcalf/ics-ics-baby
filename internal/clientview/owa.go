@@ -184,12 +184,12 @@ func WriteOWA(cal *icsparse.CalendarInfo, inputSHA256, outDir string) (Sidecar, 
 	// The rendered body is sanitized first, so it has the first claim on
 	// the shared inline-image budget.
 	var body *SanitizeResult
-	if ev != nil && ev.AltDescRaw != nil && ev.AltDescFmtType != nil && strings.Contains(*ev.AltDescFmtType, "html") {
-		res, err := owaSanitize(*ev.AltDescRaw, filepath.Join(outDir, InlineDirName))
+	if ev != nil {
+		res, err := sanitizeParts(ev, outDir)
 		if err != nil {
 			return failView(sc, outDir, fmt.Errorf("sanitize body: %w", err))
 		}
-		body = &res
+		body = res
 	}
 
 	// Evidence of every event the view does not render (all of them when
@@ -310,6 +310,80 @@ func WriteOWA(cal *icsparse.CalendarInfo, inputSHA256, outDir string) (Sidecar, 
 	return sc, writeView(outDir, view)
 }
 
+// maxAltDescParts bounds the HTML X-ALT-DESC parts sanitized per event.
+const maxAltDescParts = 8
+
+// sanitizeParts sanitizes every FMTTYPE=text/html X-ALT-DESC of ev (nil when
+// it has none). The evidence of all parts is merged; the HTML is the last
+// part with visible content (text or an image), else the last part, so a
+// trailing empty or script-only part does not blank the body and an earlier
+// part's references are never lost.
+func sanitizeParts(ev *icsparse.EventInfo, outDir string) (*SanitizeResult, error) {
+	parts := ev.AltDescHTMLParts
+	if len(parts) == 0 {
+		return nil, nil
+	}
+	merged := &SanitizeResult{}
+	if len(parts) > maxAltDescParts {
+		parts = parts[:maxAltDescParts]
+		merged.Dropped = append(merged.Dropped, "alt_desc_parts_capped")
+	}
+	refSeen, linkSeen, dropSeen := map[RemoteRef]bool{}, map[Link]bool{}, map[string]bool{}
+	for _, d := range merged.Dropped {
+		dropSeen[d] = true
+	}
+	chosen, chosenVisible := "", false
+	for _, part := range parts {
+		res, err := owaSanitize(part, filepath.Join(outDir, InlineDirName))
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range res.RemoteRefs {
+			if !refSeen[r] {
+				refSeen[r] = true
+				merged.RemoteRefs = append(merged.RemoteRefs, r)
+			}
+		}
+		for _, l := range res.Links {
+			if !linkSeen[l] {
+				linkSeen[l] = true
+				merged.Links = append(merged.Links, l)
+			}
+		}
+		for _, d := range res.Dropped {
+			if !dropSeen[d] {
+				dropSeen[d] = true
+				merged.Dropped = append(merged.Dropped, d)
+			}
+		}
+		if v := visibleHTML(res.HTML); v || !chosenVisible {
+			chosen, chosenVisible = res.HTML, v
+		}
+	}
+	merged.HTML = chosen
+	return merged, nil
+}
+
+// visibleHTML: the sanitized fragment shows text or an image.
+func visibleHTML(h string) bool {
+	if strings.Contains(h, "<img") || strings.Contains(h, "owa-remote-ref") || strings.Contains(h, "<svg") {
+		return true
+	}
+	inTag, inStyle := false, false
+	for i := 0; i < len(h); i++ {
+		switch c := h[i]; {
+		case c == '<':
+			inTag = true
+			inStyle = strings.HasPrefix(h[i:], "<style") || (inStyle && !strings.HasPrefix(h[i:], "</style"))
+		case c == '>':
+			inTag = false
+		case !inTag && !inStyle && c > ' ':
+			return true
+		}
+	}
+	return false
+}
+
 // failView records a build failure in the sidecar and writes a page that
 // states it, so the HTML always exists alongside a render_failed sidecar.
 func failView(sc Sidecar, outDir string, cause error) (Sidecar, error) {
@@ -330,11 +404,9 @@ func eventEvidence(ev *icsparse.EventInfo, outDir string) (EventEvidence, error)
 		d.EventUID = *ev.UID
 	}
 	d.JoinURL, _ = JoinURL(ev)
-	if ev.AltDescRaw != nil && ev.AltDescFmtType != nil && strings.Contains(*ev.AltDescFmtType, "html") {
-		res, err := owaSanitize(*ev.AltDescRaw, filepath.Join(outDir, InlineDirName))
-		if err != nil {
-			return d, err
-		}
+	if res, err := sanitizeParts(ev, outDir); err != nil {
+		return d, err
+	} else if res != nil {
 		if res.RemoteRefs != nil {
 			d.RemoteRefs = res.RemoteRefs
 		}

@@ -86,14 +86,15 @@ type EventInfo struct {
 	Duration              *string                `json:"duration,omitempty"`
 	RawProps              map[string][]string    `json:"raw_props"`
 	AutoprocessingSignals *AutoprocessingSignals `json:"autoprocessing_signals,omitempty"`
-	// AltDescRaw is the FMTTYPE=text/html X-ALT-DESC the preview shows as
-	// HTML (or, without one, the first non-empty X-ALT-DESC),
-	// ICS-TEXT-unescaped but not sanitized. Never serialized; consumers must sanitize before display.
+	// AltDescRaw is the first non-empty X-ALT-DESC value, ICS-TEXT-unescaped
+	// but not sanitized. Never serialized; consumers must sanitize before
+	// display.
 	AltDescRaw *string `json:"-"`
-	// AltDescFmtType is "text/html" when AltDescRaw is the preview's HTML
-	// body, else that X-ALT-DESC's FMTTYPE parameter, lower-cased.
-	AltDescFmtType   *string `json:"-"`
-	altDescIsPreview bool
+	// AltDescFmtType is that X-ALT-DESC's FMTTYPE parameter, lower-cased.
+	AltDescFmtType *string `json:"-"`
+	// AltDescHTMLParts are every non-empty FMTTYPE=text/html X-ALT-DESC, in
+	// order, unescaped and unsanitized (never serialized).
+	AltDescHTMLParts []string `json:"-"`
 	// OrganizerCN is the ORGANIZER's CN parameter (display name), if any.
 	OrganizerCN *string `json:"-"`
 	// Findings are the stable-coded forms of this event's alert strings.
@@ -825,21 +826,20 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 					ev.OrganizerCN = ptr(cn)
 				}
 			case "X-ALT-DESC":
-				tookHTML := descEvent.absorbAltDescription(value, params)
+				descEvent.absorbAltDescription(value, params)
 				ev.RawProps = addRawProp(ev.RawProps, up, value)
-				// The same body the preview shows: the FMTTYPE=text/html
-				// X-ALT-DESC it took as HTML (the last one that sanitized to
-				// something); without one, the first non-empty X-ALT-DESC.
-				// (The view, like OWA, honours FMTTYPE: no HTML guessing.)
+				// Every FMTTYPE=text/html part is kept for the view (it renders
+				// the last one with visible content and records the evidence
+				// of all); AltDescRaw is the first non-empty X-ALT-DESC.
 				raw := unescapeICSTextExact(value)
-				switch {
-				case tookHTML && strings.Contains(strings.ToLower(params["FMTTYPE"]), "html"):
-					ev.AltDescRaw, ev.AltDescFmtType, ev.altDescIsPreview = ptr(raw), ptr("text/html"), true
-				case ev.altDescIsPreview:
-				case ev.AltDescRaw == nil || (strings.TrimSpace(*ev.AltDescRaw) == "" && strings.TrimSpace(raw) != ""):
+				ft := strings.ToLower(strings.TrimSpace(params["FMTTYPE"]))
+				if strings.Contains(ft, "html") && strings.TrimSpace(raw) != "" {
+					ev.AltDescHTMLParts = append(ev.AltDescHTMLParts, raw)
+				}
+				if ev.AltDescRaw == nil || (strings.TrimSpace(*ev.AltDescRaw) == "" && strings.TrimSpace(raw) != "") {
 					ev.AltDescRaw, ev.AltDescFmtType = ptr(raw), nil
-					if ft, ok := params["FMTTYPE"]; ok {
-						ev.AltDescFmtType = ptr(strings.ToLower(strings.TrimSpace(ft)))
+					if _, ok := params["FMTTYPE"]; ok {
+						ev.AltDescFmtType = ptr(ft)
 					}
 				}
 			case "DTSTART":
@@ -1889,11 +1889,10 @@ func (d *descriptionCapture) absorbDescription(value string) {
 	}
 }
 
-// absorbAltDescription reports whether value became the HTML body.
-func (d *descriptionCapture) absorbAltDescription(value string, params map[string]string) (tookHTML bool) {
+func (d *descriptionCapture) absorbAltDescription(value string, params map[string]string) {
 	text := strings.TrimSpace(unescapeICSText(value))
 	if text == "" {
-		return false
+		return
 	}
 	fmtType := strings.ToLower(params["FMTTYPE"])
 	htmlHint := strings.Contains(fmtType, "html")
@@ -1901,7 +1900,6 @@ func (d *descriptionCapture) absorbAltDescription(value string, params map[strin
 		if html := sanitizeDescriptionHTML(text); html != "" {
 			d.html = html
 			d.hasHTML = true
-			tookHTML = true
 		}
 		if !d.hasPlain {
 			plain := strings.TrimSpace(htmlToPlainText(text))
@@ -1919,7 +1917,7 @@ func (d *descriptionCapture) absorbAltDescription(value string, params map[strin
 				}
 			}
 		}
-		return tookHTML
+		return
 	}
 	if !d.hasPlain {
 		cleaned := htmlstd.UnescapeString(text)
@@ -1929,7 +1927,6 @@ func (d *descriptionCapture) absorbAltDescription(value string, params map[strin
 			d.hasPlain = true
 		}
 	}
-	return false
 }
 func htmlToPlainText(input string) string {
 	trimmed := strings.TrimSpace(input)

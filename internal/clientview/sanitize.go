@@ -129,6 +129,17 @@ var formattingMarkers = map[string]bool{
 	"td": true, "th": true, "caption": true,
 }
 
+// htmlBreakout start tags make the parser leave <svg>/<math> content.
+var htmlBreakout = map[string]bool{
+	"b": true, "big": true, "blockquote": true, "body": true, "br": true, "center": true,
+	"code": true, "dd": true, "div": true, "dl": true, "dt": true, "em": true, "embed": true,
+	"h1": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true, "head": true,
+	"hr": true, "i": true, "img": true, "li": true, "listing": true, "menu": true, "meta": true,
+	"nobr": true, "ol": true, "p": true, "pre": true, "ruby": true, "s": true, "small": true,
+	"span": true, "strong": true, "strike": true, "sub": true, "sup": true, "table": true,
+	"tt": true, "u": true, "ul": true, "var": true, "font": true,
+}
+
 var voidElements = map[string]bool{
 	"area": true, "base": true, "br": true, "col": true, "embed": true, "hr": true,
 	"img": true, "input": true, "link": true, "meta": true, "source": true,
@@ -241,6 +252,7 @@ func OWASanitize(raw string, inlineDir string) (SanitizeResult, error) {
 		// Never fail the whole view over one body: record it and show a
 		// placeholder instead.
 		s.drop("parse_failed")
+		s.tokenEvidence(raw)
 		return SanitizeResult{HTML: unrenderedBody, RemoteRefs: s.refs, Links: s.links, Dropped: s.dropped}, nil
 	}
 	root := &html.Node{Type: html.ElementNode, Data: "div", DataAtom: atom.Div}
@@ -276,6 +288,51 @@ func OWASanitize(raw string, inlineDir string) (SanitizeResult, error) {
 		out = unrenderedBody
 	}
 	return SanitizeResult{HTML: out, RemoteRefs: s.refs, Links: s.links, Dropped: s.dropped}, nil
+}
+
+// tokenEvidence records links and resource references from the raw tokens
+// of a body the parser could not build, so its evidence still reaches the
+// sidecar.
+func (s *sanitizer) tokenEvidence(raw string) {
+	z := html.NewTokenizer(strings.NewReader(raw))
+	for {
+		tt := z.Next()
+		if tt == html.ErrorToken {
+			return
+		}
+		if tt != html.StartTagToken && tt != html.SelfClosingTagToken {
+			continue
+		}
+		name, hasAttr := z.TagName()
+		tag := string(name)
+		for hasAttr {
+			var k, v []byte
+			k, v, hasAttr = z.TagAttr()
+			key, val := strings.ToLower(string(k)), strings.TrimSpace(string(v))
+			if val == "" || scriptScheme(val) {
+				continue
+			}
+			switch {
+			case key == "href" && (tag == "a" || tag == "area"):
+				host := ""
+				if u, err := url.Parse(val); err == nil {
+					host = u.Host
+				}
+				s.addLink(Link{Href: val, Host: host})
+			case key == "href" || key == "xlink:href" || resourceAttrs[key]:
+				if strings.HasPrefix(strings.ToLower(val), "data:") {
+					continue
+				}
+				s.addRef(s.classify(val))
+			case key == "srcset":
+				for _, c := range splitSrcset(val) {
+					if r := s.classify(c); r.Kind != "inline_data" {
+						s.addRef(r)
+					}
+				}
+			}
+		}
+	}
 }
 
 // unrenderedBody replaces a body that cannot be shown safely.
@@ -373,22 +430,68 @@ func hasOnlyClass(n *html.Node, class string) bool {
 // With strict, elements with optional end tags count too.
 func depthCut(raw string, max int, strict bool) (int, bool) {
 	z := html.NewTokenizer(strings.NewReader(raw))
-	// The stack mirrors the tree builder closely enough to bound depth: an
-	// end tag closes only an element that is open (a stray </span> does not
-	// lower the count), and "<div/>" opens a div in HTML content. In foreign
-	// content a self-closing tag is closed, so this over-counts there; that
-	// only cuts sooner.
-	var stack []string
+	// The model mirrors the tree builder closely enough to bound the tree:
+	//  - stack: open elements. An end tag closes only an element that is
+	//    open (a stray </span> does not lower it); "<div/>" opens a div in
+	//    HTML content but is closed inside <svg>/<math>.
+	//  - active: the active formatting elements. One stays active until its
+	//    own end tag, even after an enclosing end tag popped it off the
+	//    stack, and the parser re-creates it (distinct attributes defeat the
+	//    Noah's-Ark clause) for later text: that adds depth and nodes.
+	//    "|"-prefixed entries are scope markers (cells, captions, marquee,
+	//    object, applet, template) that end tags do not reach past.
+	var stack, active []string
+	onStack := 0 // formatting elements that are also on the stack
+	nActive := 0 // formatting (non-marker) entries in active
+	depth := func() int {
+		extra := nActive - onStack
+		if extra < 0 {
+			extra = 0
+		}
+		return len(stack) + extra
+	}
+	foreign := func() bool {
+		for i := len(stack) - 1; i >= 0; i-- {
+			switch stack[i] {
+			case "svg", "math":
+				return true
+			case "foreignobject", "desc", "title", "mi", "mo", "mn", "ms", "mtext", "annotation-xml":
+				return false
+			}
+		}
+		return false
+	}
+	pop := func(i int) { // close stack[i:]
+		for _, t := range stack[i:] {
+			if formattingElements[t] {
+				onStack--
+			}
+		}
+		stack = stack[:i]
+	}
+	popMarker := func(markers ...string) { // drop active back past a marker
+		if len(active) == 0 {
+			return
+		}
+		for i := len(active) - 1; i >= 0; i-- {
+			if active[i][0] == '|' {
+				for _, m := range markers {
+					if active[i] == "|"+m {
+						for _, a := range active[i:] {
+							if a[0] != '|' {
+								nActive--
+							}
+						}
+						active = active[:i]
+						return
+					}
+				}
+				return
+			}
+		}
+	}
 	off := 0
-	// Each open formatting element can be re-created by the tree builder for
-	// every later text run or element (distinct attributes defeat the
-	// Noah's-Ark clause), so the tree can grow far past the input. Bound the
-	// worst case: sum, per token, the formatting elements still active. An
-	// element stays active until its own end tag, even after an enclosing
-	// end tag popped it off the open stack.
-	var active []string // "" marks a scope marker (td, marquee, ...)
 	rebuilt := 0
-	foreign := 0 // open <svg>/<math>: there "<x/>" is closed
 	for {
 		tt := z.Next()
 		if tt == html.ErrorToken {
@@ -398,8 +501,7 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 		if tt == html.StartTagToken || tt == html.SelfClosingTagToken || tt == html.TextToken || tt == html.EndTagToken {
 			// (end tags are charged too: closing one scans the active list)
 			rebuilt += len(active)
-			if rebuilt > maxRebuiltNodes || len(stack)+len(active) > max {
-				// (re-created formatting elements deepen the tree too)
+			if rebuilt > maxRebuiltNodes || depth() > max {
 				return off, true
 			}
 		}
@@ -407,54 +509,79 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 		case html.StartTagToken, html.SelfClosingTagToken:
 			name, _ := z.TagName()
 			tag := string(name)
-			if tt == html.SelfClosingTagToken && foreign > 0 {
+			inForeignContent := foreign()
+			if inForeignContent && !htmlBreakout[tag] && tt == html.StartTagToken {
+				// <title>/<style>/... inside svg/math hold markup, not raw
+				// text: the parser reads them that way.
+				z.NextIsNotRawText()
+			}
+			if inForeignContent && htmlBreakout[tag] {
+				// The parser leaves foreign content here: close it.
+				for i := len(stack) - 1; i >= 0; i-- {
+					if stack[i] == "svg" || stack[i] == "math" {
+						pop(i)
+						break
+					}
+				}
+				inForeignContent = foreign()
+			}
+			switch tag {
+			case "td", "th":
+				popMarker("td", "th")
+			case "tr", "tbody", "thead", "tfoot":
+				popMarker("td", "th", "caption")
+			}
+			if tt == html.SelfClosingTagToken && (inForeignContent || tag == "svg" || tag == "math") {
+				break // closed at once
+			}
+			if voidElements[tag] {
 				break
 			}
-			if !voidElements[tag] && (strict || !optionalEndTags[tag]) {
-				stack = append(stack, tag)
-				switch {
-				case formattingElements[tag]:
-					active = append(active, tag)
-				case formattingMarkers[tag]:
-					active = append(active, "")
-				case tag == "svg" || tag == "math":
-					foreign++
-				}
-				if len(stack)+len(active) > max {
-					return off, true
-				}
+			if formattingMarkers[tag] {
+				active = append(active, "|"+tag)
+			}
+			if !strict && optionalEndTags[tag] {
+				break
+			}
+			stack = append(stack, tag)
+			if formattingElements[tag] {
+				active = append(active, tag)
+				nActive++
+				onStack++
+			}
+			if depth() > max {
+				return off, true
 			}
 		case html.EndTagToken:
 			name, _ := z.TagName()
 			tag := string(name)
 			if formattingElements[tag] {
 				// Only back to the last scope marker, as the parser does.
-				for i := len(active) - 1; i >= 0 && active[i] != ""; i-- {
+				for i := len(active) - 1; i >= 0 && active[i][0] != '|'; i-- {
 					if active[i] == tag {
 						active = append(active[:i], active[i+1:]...)
+						nActive--
 						break
 					}
 				}
 			}
-			if !voidElements[tag] && (strict || !optionalEndTags[tag]) {
-				for i := len(stack) - 1; i >= 0; i-- {
-					if stack[i] == tag {
-						for _, t := range stack[i:] {
-							if t == "svg" || t == "math" {
-								foreign--
-							}
-						}
-						stack = stack[:i]
-						break
-					}
-				}
+			switch tag {
+			case "td", "th":
+				popMarker("td", "th")
+			case "tr", "tbody", "thead", "tfoot", "table":
+				popMarker("td", "th", "caption")
+			default:
 				if formattingMarkers[tag] {
-					for i := len(active) - 1; i >= 0; i-- {
-						if active[i] == "" {
-							active = active[:i]
-							break
-						}
-					}
+					popMarker(tag)
+				}
+			}
+			if voidElements[tag] || (!strict && optionalEndTags[tag]) {
+				break
+			}
+			for i := len(stack) - 1; i >= 0; i-- {
+				if stack[i] == tag {
+					pop(i)
+					break
 				}
 			}
 		}
@@ -591,13 +718,19 @@ func (s *sanitizer) walk(root *html.Node) {
 			continue
 		}
 		if tag == "form" {
+			s.drop("element:form")
+			if n.FirstChild == nil {
+				// In table structure the parser inserts the form empty;
+				// nothing is lost removing it.
+				n.Parent.RemoveChild(n)
+				continue
+			}
 			// Unwrapping a form can leave a tree the parser never builds
 			// (li>div>li), which Chromium re-parses differently. Replace it
 			// with an attribute-less <section>: also a block the parser
 			// treats as "special", but inert.
 			n.Data, n.DataAtom, n.Attr = "section", atom.Section, nil
 			tag = "section"
-			s.drop("element:form")
 		}
 		if tag == "img" || tag == "image" {
 			if ph := s.image(n); ph != nil {

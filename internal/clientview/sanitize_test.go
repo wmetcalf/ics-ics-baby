@@ -664,3 +664,76 @@ func TestSanitizeRound3(t *testing.T) {
 		}
 	})
 }
+
+// Round-4 review cases.
+func TestSanitizeRound4(t *testing.T) {
+	san := func(t *testing.T, in string) SanitizeResult {
+		t.Helper()
+		res, err := OWASanitize(in, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	t.Run("form in table stays renderable", func(t *testing.T) {
+		res := san(t, `<p>Confirm</p><table><form action="https://evil.example/l"><tr><td>Password <input type=password></td></tr></form></table>`)
+		if contains(res.Dropped, "unstable_markup") || !strings.Contains(res.HTML, "Password") {
+			t.Fatalf("%s / %v", res.HTML, res.Dropped)
+		}
+	})
+	t.Run("parse failure keeps evidence", func(t *testing.T) {
+		res := san(t, `<p><a href="https://evil.example/pay">Pay now</a><img src="https://track.example/p.gif"></p><svg><title>`+strings.Repeat("<div>", 600))
+		if len(res.Links) == 0 || len(res.RemoteRefs) == 0 {
+			t.Fatalf("evidence lost: links %v refs %v dropped %v", res.Links, res.RemoteRefs, res.Dropped)
+		}
+	})
+	t.Run("self-closing svg does not hide later depth", func(t *testing.T) {
+		res := san(t, `<p><a href="https://evil.example/pay">Pay</a></p><svg width=0 height=0/>`+strings.Repeat("<span/>", 520))
+		if contains(res.Dropped, "parse_failed") || len(res.Links) != 1 {
+			t.Fatalf("dropped %v links %v", res.Dropped, res.Links)
+		}
+	})
+	t.Run("unclosed font in cells not double counted", func(t *testing.T) {
+		res := san(t, "<table>"+strings.Repeat("<tr><td><font face=Arial size=2>item</td></tr>", 250)+"</table><p>END-OF-AGENDA</p>")
+		if !strings.Contains(res.HTML, "END-OF-AGENDA") {
+			t.Fatalf("truncated: %v", res.Dropped)
+		}
+	})
+	t.Run("implicitly closed cells do not leak markers", func(t *testing.T) {
+		if _, cut := depthCut("<table>"+strings.Repeat("<tr><td>a<td>b<td>c</tr>", 170)+"</table>", 480, true); cut {
+			t.Fatal("shallow table cut")
+		}
+		if _, cut := depthCut(strings.Repeat("<table><caption>Agenda<tr><td>x</td></tr></table>", 600), 480, false); cut {
+			t.Fatal("captions cut")
+		}
+	})
+}
+
+// stableInView is the backstop against markup Chromium re-parses
+// differently; test it directly so it cannot be removed silently.
+func TestStableInView(t *testing.T) {
+	for _, ok := range []string{`<p>hi</p>`, `<table><tbody><tr><td>x</td></tr></tbody></table>`, `<style>.owa-body p{color:red}</style><p>x</p>`, `<svg><rect></rect></svg>`} {
+		if !stableInView(ok) {
+			t.Errorf("legit markup rejected: %s", ok)
+		}
+	}
+	for _, bad := range []string{
+		`<svg><span>x</span><html style="color:red"></html></svg>`,
+		`<li><div><li></li></div></li>`,
+		`</div></div></div><div>out</div>`,
+		`<table><span>x</span></table>`,
+		`<body onload="x">y`,
+	} {
+		if stableInView(bad) {
+			t.Errorf("unstable markup accepted: %s", bad)
+		}
+	}
+}
+
+func TestTokenEvidence(t *testing.T) {
+	s := newSanitizer("")
+	s.tokenEvidence(`<a href="https://evil.example/pay">x</a><img src="http://t.example/p.gif"><img srcset="https://s.example/a.png 1x">`)
+	if len(s.links) != 1 || s.links[0].Host != "evil.example" || len(s.refs) != 2 {
+		t.Fatalf("links %v refs %v", s.links, s.refs)
+	}
+}
