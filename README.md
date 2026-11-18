@@ -305,9 +305,9 @@ ics-ics-baby computes no perceptual hashes. It returns every image as a file (pr
 
 Each alert in the manifest gets a stable `code`, kept in a single table in `internal/icsparse/findings.go`. Its `message` is the exact alert string, so the manifest and HTML do not change. `severity` is one of `info`, `low`, `medium` or `high`. Calendar-level findings have no `event_uid`.
 
-## Blastbox engine contract
+## Blastbox engine
 
-`blastbox-engine.toml` (schema `blastbox-engine-contract/1`) describes the artifacts, payload and finding codes for an optional blastbox engine wrapper named `ics-ics-baby`. The wrapper will run this CLI offline with `--screenshot-engine chromium --invite-view owa --findings-json`. The CLI itself has no blastbox dependency.
+An optional blastbox engine named `ics-ics-baby` wraps this CLI. It lives with the other mail engines, in `src/mail_engines/icsbaby.py` of the msg-mbox-to-eml engines repo, together with its output contract (`blastbox-engine.ics-ics-baby.toml`). The engine pins a commit of this repo and runs the binary offline with `--screenshot-engine chromium --invite-view owa --findings-json --max-attachments N`. `--list-finding-codes` prints the finding code table as JSON, and the engine's tests check the contract's detections against it. The CLI itself has no blastbox dependency.
 
 ## Testing
 

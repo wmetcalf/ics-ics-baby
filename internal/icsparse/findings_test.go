@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -118,28 +117,6 @@ func TestFindingsDoc(t *testing.T) {
 	empty := FindingsDoc(&CalendarInfo{}, "x")
 	if b, _ := json.Marshal(empty); !strings.Contains(string(b), `"findings":[]`) {
 		t.Fatalf("empty doc: %s", b)
-	}
-}
-
-// TestEngineContractListsEveryCode keeps blastbox-engine.toml's [[detections]]
-// in sync with the code table (codes and severities).
-func TestEngineContractListsEveryCode(t *testing.T) {
-	b, err := os.ReadFile("../../blastbox-engine.toml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	re := regexp.MustCompile(`(?m)^\[\[detections\]\]\ncode = "([^"]+)"\nseverity = "([^"]+)"`)
-	got := map[string]string{}
-	for _, m := range re.FindAllStringSubmatch(string(b), -1) {
-		got[m[1]] = m[2]
-	}
-	if len(got) != len(findingCodes) {
-		t.Fatalf("contract lists %d codes, table has %d", len(got), len(findingCodes))
-	}
-	for code, meta := range findingCodes {
-		if got[code] != meta.Severity {
-			t.Errorf("contract %s severity %q, table %q", code, got[code], meta.Severity)
-		}
 	}
 }
 
