@@ -386,12 +386,20 @@ func sanitizeParts(ev *icsparse.EventInfo, outDir string) (*SanitizeResult, erro
 	addEvidence := func(refs []RemoteRef, links []Link) {
 		for _, r := range refs {
 			if !refSeen[r] {
+				if len(merged.RemoteRefs) >= maxRecorded {
+					addDrop("refs_capped")
+					break
+				}
 				refSeen[r] = true
 				merged.RemoteRefs = append(merged.RemoteRefs, r)
 			}
 		}
 		for _, l := range links {
 			if !linkSeen[l] {
+				if len(merged.Links) >= maxRecorded {
+					addDrop("links_capped")
+					break
+				}
 				linkSeen[l] = true
 				merged.Links = append(merged.Links, l)
 			}
@@ -424,9 +432,11 @@ func sanitizeParts(ev *icsparse.EventInfo, outDir string) (*SanitizeResult, erro
 		addDrop("alt_desc_parts_capped")
 	}
 	// Evidence in document order: earliest part first.
-	for i := 0; i < start; i++ {
-		s := newSanitizer("")
-		s.tokenEvidence(parts[i])
+	if start > 0 {
+		s := newSanitizer("") // one sanitizer: its caps hold across these parts
+		for i := 0; i < start; i++ {
+			s.tokenEvidence(parts[i])
+		}
 		addEvidence(s.refs, s.links)
 	}
 	for i := len(results) - 1; i >= 0; i-- {
@@ -550,14 +560,20 @@ func neutralizeBidi(v *owaView) {
 
 func writeView(outDir string, view owaView, g *buildGuard) error {
 	neutralizeBidi(&view)
-	if g != nil {
+	// Under g.mu only the final file write: WriteOWABudgeted must be able
+	// to abandon the build while the template executes.
+	locked := func(write func() error) error {
+		if g == nil {
+			return write()
+		}
 		g.mu.Lock()
 		defer g.mu.Unlock()
 		if g.abandoned {
 			// WriteOWABudgeted gave up on this build and wrote a failure
-			// page; the write below must not replace it.
+			// page; this write must not replace it.
 			return fmt.Errorf("view build abandoned")
 		}
+		return write()
 	}
 	var buf bytes.Buffer
 	if err := owaTemplate.Execute(&buf, view); err != nil {
@@ -565,15 +581,20 @@ func writeView(outDir string, view owaView, g *buildGuard) error {
 		buf.Reset()
 		fmt.Fprintf(&buf, "<!doctype html><meta charset=utf-8><title>view failed</title><p>View failed: %s</p><p>Emulated Outlook-on-the-web rendering — ics-ics-baby · input sha256 %s</p>",
 			htmlstd.EscapeString("render owa template: "+err.Error()), htmlstd.EscapeString(view.InputSHA256))
-		if werr := os.MkdirAll(outDir, 0o755); werr == nil {
-			_ = os.WriteFile(filepath.Join(outDir, OWAHTMLName), buf.Bytes(), 0o644)
-		}
+		_ = locked(func() error {
+			if werr := os.MkdirAll(outDir, 0o755); werr != nil {
+				return werr
+			}
+			return os.WriteFile(filepath.Join(outDir, OWAHTMLName), buf.Bytes(), 0o644)
+		})
 		return fmt.Errorf("render owa template: %w", err)
 	}
-	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(outDir, OWAHTMLName), buf.Bytes(), 0o644)
+	return locked(func() error {
+		if err := os.MkdirAll(outDir, 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(outDir, OWAHTMLName), buf.Bytes(), 0o644)
+	})
 }
 
 func organizerAddress(org *string) string {

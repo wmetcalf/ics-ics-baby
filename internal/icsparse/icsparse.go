@@ -822,6 +822,9 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 				for k, v := range params {
 					organizerParams[k] = v
 				}
+				// The CN always belongs to the ORGANIZER line it came with: a
+				// later ORGANIZER without CN clears an earlier one's.
+				ev.OrganizerCN = nil
 				if cn := params["CN"]; cn != "" {
 					ev.OrganizerCN = ptr(cn)
 				}

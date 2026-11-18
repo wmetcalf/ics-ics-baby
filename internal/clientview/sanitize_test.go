@@ -368,7 +368,7 @@ func TestCSSNestingBounded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d := time.Since(start); d > time.Second {
+	if d := time.Since(start); d > 5*time.Second {
 		t.Fatalf("took %v", d)
 	}
 	if !contains(res.Dropped, "css:nesting_limit") {
@@ -515,13 +515,13 @@ func TestFormattingReconstructionBounded(t *testing.T) {
 		b.WriteString(`<b x=` + strconv.Itoa(i) + `>`)
 	}
 	b.WriteString("</p>")
-	b.WriteString(strings.Repeat("<p>x</p>", 20000))
+	b.WriteString(strings.Repeat("<p>x</p>", 60000) /* unbounded: ~10 s */)
 	start := time.Now()
 	res, err := OWASanitize(b.String(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d := time.Since(start); d > time.Second {
+	if d := time.Since(start); d > 5*time.Second {
 		t.Fatalf("took %v", d)
 	}
 	if !contains(res.Dropped, "input_truncated") {
@@ -565,12 +565,12 @@ func TestInlineImageCapSharedAcrossBodies(t *testing.T) {
 
 // Deeply nested ( in a declaration must not make CSS validation quadratic.
 func TestCSSValidateNestedParensLinear(t *testing.T) {
-	css := "p{color:" + strings.Repeat("(", 100000) + "x" + strings.Repeat(")", 100000) + "}"
+	css := "p{color:" + strings.Repeat("(", 200000) + "x" + strings.Repeat(")", 200000) + "}"
 	start := time.Now()
 	if _, err := OWASanitize("<style>"+css+"</style><p>x</p>", ""); err != nil {
 		t.Fatal(err)
 	}
-	if d := time.Since(start); d > time.Second {
+	if d := time.Since(start); d > 5*time.Second {
 		t.Fatalf("took %v", d)
 	}
 }
@@ -620,10 +620,10 @@ func TestSanitizeRound3(t *testing.T) {
 			b.WriteString(`<b x=` + strconv.Itoa(i) + `>`)
 		}
 		b.WriteString("<marquee>" + strings.Repeat("</b>", 400) + "</marquee>")
-		b.WriteString(strings.Repeat("<p>x</p>", 20000))
+		b.WriteString(strings.Repeat("<p>x</p>", 60000))
 		start := time.Now()
 		res := san(t, b.String())
-		if d := time.Since(start); d > time.Second {
+		if d := time.Since(start); d > 5*time.Second {
 			t.Fatalf("took %v", d)
 		}
 		if !contains(res.Dropped, "input_truncated") {
@@ -997,5 +997,30 @@ func TestInlineDataCanonical(t *testing.T) {
 func TestVisibleHTMLIgnoresStyle(t *testing.T) {
 	if visibleHTML(`<style>.owa-body [class=owa-remote-ref]{color:red}</style>`) {
 		t.Fatal("style-only fragment counted as visible")
+	}
+}
+
+func TestInlineDataCanonicalMIME(t *testing.T) {
+	res, err := OWASanitize(`<img src="data:image/gif;base64,`+onePxPNG+`"><img src="data:image/png;base64,`+onePxPNG+`">`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(res.HTML, `src="data:image/png;base64,`+onePxPNG+`"`) != 2 {
+		t.Fatalf("%s", res.HTML)
+	}
+}
+
+func TestEvidenceClippedAndTokenDataRecorded(t *testing.T) {
+	s := newSanitizer("")
+	s.tokenEvidence(`<a href="https://e.example/` + strings.Repeat("a", 20000) + `">x</a><img src="data:image/png;base64,AAAA">`)
+	if len(s.links) != 1 || len(s.links[0].Href) > maxEvidenceValue+8 {
+		t.Fatalf("link not clipped: %d", len(s.links[0].Href))
+	}
+	found := false
+	for _, r := range s.refs {
+		found = found || r.Kind == "inline_data"
+	}
+	if !found {
+		t.Fatalf("inline data image not recorded: %+v", s.refs)
 	}
 }

@@ -245,12 +245,12 @@ type sanitizer struct {
 	dropped       []string
 	droppedSeen   map[string]bool
 	capped        bool
-	inlineSeen    map[string]bool // inline image files written
-	inlineFiles   int             // files in inlineDir, this body's included
-	inlinePixels  int64           // decoded pixels of the kept inline images
-	pixelSeen     map[string]bool // sha256 of images already charged
-	lastCanonical string          // canonical data: URL of the last kept inline image
-	styles        []*html.Node    // sanitized <style> elements, in order
+	inlineSeen    map[string]bool   // inline image files written
+	inlineFiles   int               // files in inlineDir, this body's included
+	inlinePixels  int64             // decoded pixels of the kept inline images
+	formatOf      map[string]string // sha256 -> real format of images already charged
+	lastCanonical string            // canonical data: URL of the last kept inline image
+	styles        []*html.Node      // sanitized <style> elements, in order
 }
 
 func newSanitizer(inlineDir string) *sanitizer {
@@ -261,7 +261,7 @@ func newSanitizer(inlineDir string) *sanitizer {
 		linkSeen:    map[string]bool{},
 		droppedSeen: map[string]bool{},
 		inlineSeen:  map[string]bool{},
-		pixelSeen:   map[string]bool{},
+		formatOf:    map[string]string{},
 	}
 	if inlineDir != "" {
 		// The cap is per directory: every body of one view shares it.
@@ -279,7 +279,19 @@ func (s *sanitizer) drop(what string) {
 	}
 }
 
+// maxEvidenceValue clips a recorded URL: the sidecar keeps the evidence,
+// not megabytes of attacker text.
+const maxEvidenceValue = 8 << 10
+
+func clipEvidence(v string) string {
+	if len(v) <= maxEvidenceValue {
+		return v
+	}
+	return truncateUTF8(v, maxEvidenceValue) + "…"
+}
+
 func (s *sanitizer) addRef(r RemoteRef) {
+	r.Value, r.Host = clipEvidence(r.Value), clipEvidence(r.Host)
 	key := r.Kind + "\x00" + r.Value + "\x00" + r.SHA256
 	if s.refSeen[key] {
 		return
@@ -293,6 +305,7 @@ func (s *sanitizer) addRef(r RemoteRef) {
 }
 
 func (s *sanitizer) addLink(l Link) {
+	l.Href, l.Host = clipEvidence(l.Href), clipEvidence(l.Host)
 	key := l.Href + "\x00" + l.Text
 	if s.linkSeen[key] {
 		return
@@ -443,15 +456,10 @@ func (s *sanitizer) tokenEvidence(raw string) {
 				}
 				s.addLink(Link{Href: val, Host: host})
 			case key == "href" || key == "xlink:href" || resourceAttrs[key]:
-				if strings.HasPrefix(strings.ToLower(val), "data:") {
-					continue
-				}
-				s.addRef(s.classify(val))
+				s.addRef(s.classify(val)) // data: -> inline_data (media type)
 			case key == "srcset":
 				for _, c := range splitSrcset(val) {
-					if r := s.classify(c); r.Kind != "inline_data" {
-						s.addRef(r)
-					}
+					s.addRef(s.classify(c))
 				}
 			}
 		}
@@ -1092,12 +1100,24 @@ func (s *sanitizer) hoistStyles(root *html.Node) {
 // decodes more BMP variants than x/image/bmp, so a BMP header is read
 // directly when DecodeConfig gives up.
 func imageSize(data []byte) (w, h int, ok bool) {
+	w, h, _, ok = imageInfo(data)
+	return w, h, ok
+}
+
+// imageInfo is imageSize plus the format the bytes really are.
+func imageInfo(data []byte) (w, h int, format string, ok bool) {
 	if len(data) >= 6 && (string(data[:6]) == "GIF87a" || string(data[:6]) == "GIF89a") {
-		return gifSize(data)
+		w, h, ok = gifSize(data)
+		return w, h, "gif", ok
 	}
-	if cfg, _, err := image.DecodeConfig(bytes.NewReader(data)); err == nil {
-		return cfg.Width, cfg.Height, true
+	if cfg, f, err := image.DecodeConfig(bytes.NewReader(data)); err == nil {
+		return cfg.Width, cfg.Height, f, true
 	}
+	w, h, ok = bmpSize(data)
+	return w, h, "bmp", ok
+}
+
+func bmpSize(data []byte) (w, h int, ok bool) {
 	if len(data) < 26 || data[0] != 'B' || data[1] != 'M' {
 		return 0, 0, false
 	}
@@ -1554,8 +1574,8 @@ func (s *sanitizer) inlineImage(raw string) (RemoteRef, bool) {
 	sum := sha256.Sum256(data)
 	sha := hex.EncodeToString(sum[:])
 	r := RemoteRef{Kind: "inline_data", Value: "data:" + mime, SHA256: sha, Mime: mime}
-	if !s.pixelSeen[sha] {
-		w, h, ok := imageSize(data)
+	if s.formatOf[sha] == "" {
+		w, h, f, ok := imageInfo(data)
 		if !ok {
 			s.drop("data_image_malformed")
 			s.addRef(r) // dropped, but still evidence
@@ -1568,7 +1588,7 @@ func (s *sanitizer) inlineImage(raw string) (RemoteRef, bool) {
 			return RemoteRef{}, false
 		}
 		s.inlinePixels += px // each distinct image once
-		s.pixelSeen[sha] = true
+		s.formatOf[sha] = f
 	}
 	if s.inlineDir != "" {
 		name := sha + "." + ext
@@ -1597,7 +1617,13 @@ func (s *sanitizer) inlineImage(raw string) (RemoteRef, bool) {
 	// aliases of the same bytes (extra media parameters, percent- vs
 	// base64-encoding) are one resource to Chromium too: the pixel budget
 	// charges each distinct image once.
-	s.lastCanonical = "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
+	// The media type is the one the bytes are, so declared aliases
+	// (image/jpg vs image/jpeg, a png declared as gif) collapse too.
+	canon := mime
+	if m, ok := map[string]string{"png": "image/png", "jpeg": "image/jpeg", "gif": "image/gif", "bmp": "image/bmp", "webp": "image/webp"}[s.formatOf[sha]]; ok {
+		canon = m
+	}
+	s.lastCanonical = "data:" + canon + ";base64," + base64.StdEncoding.EncodeToString(data)
 	return r, true
 }
 

@@ -87,3 +87,11 @@ func TestOrganizerCNWithoutSignals(t *testing.T) {
 		t.Fatalf("OrganizerCN = %q", deref(ev.OrganizerCN))
 	}
 }
+
+func TestOrganizerCNFollowsLastOrganizer(t *testing.T) {
+	cal := parseInline(t, "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:o@test\r\nSUMMARY:x\r\n"+
+		"ORGANIZER;CN=\"IT Helpdesk\":mailto:help@corp.example\r\nORGANIZER:mailto:attacker@evil.example\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
+	if ev := cal.Events[0]; ev.OrganizerCN != nil {
+		t.Fatalf("CN %q paired with another ORGANIZER's address", *ev.OrganizerCN)
+	}
+}
