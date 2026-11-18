@@ -393,16 +393,30 @@ var parseFragment = html.ParseFragment
 // sidecar.
 func (s *sanitizer) tokenEvidence(raw string) {
 	z := html.NewTokenizer(strings.NewReader(raw))
+	cssRefs := func(css string) {
+		for _, m := range cssURL.FindAllStringSubmatch(css, -1) {
+			if u := strings.TrimSpace(firstNonEmpty(m[1], m[2], m[3])); u != "" && !strings.HasPrefix(u, "#") &&
+				!strings.HasPrefix(strings.ToLower(u), "data:") && !scriptScheme(u) {
+				s.addRef(s.classify(u))
+			}
+		}
+	}
+	inStyle := false
 	for {
 		tt := z.Next()
 		if tt == html.ErrorToken {
 			return
 		}
+		if tt == html.TextToken && inStyle {
+			cssRefs(string(z.Text()))
+		}
 		if tt != html.StartTagToken && tt != html.SelfClosingTagToken {
+			inStyle = false
 			continue
 		}
 		name, hasAttr := z.TagName()
 		tag := string(name)
+		inStyle = tag == "style" && tt == html.StartTagToken
 		for hasAttr {
 			var k, v []byte
 			k, v, hasAttr = z.TagAttr()
@@ -411,6 +425,8 @@ func (s *sanitizer) tokenEvidence(raw string) {
 				continue
 			}
 			switch {
+			case key == "style":
+				cssRefs(val)
 			case key == "href" && (tag == "a" || tag == "area"):
 				host := ""
 				if u, err := url.Parse(val); err == nil {

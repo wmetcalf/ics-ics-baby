@@ -939,3 +939,17 @@ func TestSanitizeRound5Prosecution(t *testing.T) {
 		}
 	})
 }
+
+// Token evidence also reads CSS url() references in style attributes and
+// <style> text.
+func TestTokenEvidenceCSS(t *testing.T) {
+	s := newSanitizer("")
+	s.tokenEvidence(`<div style="background:url(https://bg.example/a.png)">x</div><style>p{background:url('https://sheet.example/b.png')}</style>`)
+	hosts := map[string]bool{}
+	for _, r := range s.refs {
+		hosts[r.Host] = true
+	}
+	if !hosts["bg.example"] || !hosts["sheet.example"] {
+		t.Fatalf("refs %+v", s.refs)
+	}
+}
