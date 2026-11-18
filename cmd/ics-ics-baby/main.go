@@ -427,7 +427,7 @@ func writeOWAView(cal *icsparse.CalendarInfo, inputSHA, outDir string, width int
 
 	// Outputs from an earlier run into the same directory must not survive
 	// next to this run's sidecar.
-	for _, stale := range []string{htmlPath, sidecarPath, pngPath, filepath.Join(outDir, clientview.InlineDirName)} {
+	for _, stale := range []string{htmlPath, sidecarPath, pngPath, filepath.Join(outDir, clientview.OWAChromeHTMLName), filepath.Join(outDir, clientview.InlineDirName)} {
 		if err := os.RemoveAll(stale); err != nil {
 			fmt.Fprintf(os.Stderr, "owa view: remove stale %s: %v\n", stale, err)
 		}

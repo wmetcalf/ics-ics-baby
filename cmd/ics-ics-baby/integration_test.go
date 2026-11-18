@@ -565,7 +565,7 @@ func TestCLIInviteViewNoStaleOutputs(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(out, "ics-ics-baby-inline"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []string{"ics-ics-baby-owa.png", "ics-ics-baby-inline/old.png"} {
+	for _, f := range []string{"ics-ics-baby-owa.png", "ics-ics-baby-inline/old.png", "ics-ics-baby-owa-chrome.html"} {
 		if err := os.WriteFile(filepath.Join(out, f), []byte("stale"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -574,7 +574,7 @@ func TestCLIInviteViewNoStaleOutputs(t *testing.T) {
 	if res.exit != 0 {
 		t.Fatalf("exit %d: %s", res.exit, res.stderr)
 	}
-	for _, f := range []string{"ics-ics-baby-owa.png", "ics-ics-baby-inline"} {
+	for _, f := range []string{"ics-ics-baby-owa.png", "ics-ics-baby-inline", "ics-ics-baby-owa-chrome.html"} {
 		if fileExists(filepath.Join(out, f)) {
 			t.Errorf("stale %s survived a skipped run", f)
 		}
