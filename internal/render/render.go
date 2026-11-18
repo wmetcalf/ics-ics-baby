@@ -932,12 +932,12 @@ func renderAllSecurityAlerts(dc *gg.Context, cal *icsparse.CalendarInfo, x, y, c
 			dc.DrawString("• "+pattern, x+inviteDescPadding+10, textY)
 			textY += inviteLineHeight
 		}
-		for k, v := range signals.MicrosoftHeaders {
-			dc.DrawString("  "+k+": "+v, x+inviteDescPadding+10, textY)
+		for _, line := range sortedHeaderLines(signals.MicrosoftHeaders) {
+			dc.DrawString("  "+line, x+inviteDescPadding+10, textY)
 			textY += inviteLineHeight
 		}
-		for k, v := range signals.GoogleHeaders {
-			dc.DrawString("  "+k+": "+v, x+inviteDescPadding+10, textY)
+		for _, line := range sortedHeaderLines(signals.GoogleHeaders) {
+			dc.DrawString("  "+line, x+inviteDescPadding+10, textY)
 			textY += inviteLineHeight
 		}
 	}
@@ -963,12 +963,12 @@ func renderAllSecurityAlerts(dc *gg.Context, cal *icsparse.CalendarInfo, x, y, c
 				dc.DrawString("  Organizer: "+signals.OrganizerDetails.Value, x+inviteDescPadding+10, textY)
 				textY += inviteLineHeight
 			}
-			for k, v := range signals.MicrosoftHeaders {
-				dc.DrawString("  "+k+": "+v, x+inviteDescPadding+10, textY)
+			for _, line := range sortedHeaderLines(signals.MicrosoftHeaders) {
+				dc.DrawString("  "+line, x+inviteDescPadding+10, textY)
 				textY += inviteLineHeight
 			}
-			for k, v := range signals.GoogleHeaders {
-				dc.DrawString("  "+k+": "+v, x+inviteDescPadding+10, textY)
+			for _, line := range sortedHeaderLines(signals.GoogleHeaders) {
+				dc.DrawString("  "+line, x+inviteDescPadding+10, textY)
 				textY += inviteLineHeight
 			}
 		}
@@ -2331,4 +2331,19 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// sortedHeaderLines renders a header map as "key: value" lines in key order,
+// so the PNG never depends on map iteration order.
+func sortedHeaderLines(headers map[string]string) []string {
+	keys := make([]string, 0, len(headers))
+	for k := range headers {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	lines := make([]string, 0, len(keys))
+	for _, k := range keys {
+		lines = append(lines, k+": "+headers[k])
+	}
+	return lines
 }
