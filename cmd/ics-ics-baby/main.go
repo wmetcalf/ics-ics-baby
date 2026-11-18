@@ -403,8 +403,9 @@ func writeOWAView(cal *icsparse.CalendarInfo, inputSHA, outDir string, width int
 		sc.Error = err.Error()
 		failed = true
 		fmt.Fprintf(os.Stderr, "owa view error: %v\n", err)
-	} else {
-		wrote = append(wrote, "Wrote OWA view: "+htmlPath)
+	}
+	if _, statErr := os.Stat(htmlPath); statErr == nil {
+		wrote = append(wrote, "Wrote OWA view: "+htmlPath) // a failure page when err != nil
 	}
 
 	if htmlOK && sc.Status == "ok" {

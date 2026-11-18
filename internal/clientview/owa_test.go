@@ -2,6 +2,7 @@ package clientview
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -226,5 +227,29 @@ func TestOWASkippedWritesReasonPage(t *testing.T) {
 	}
 	if !strings.Contains(html, sc.Reason) {
 		t.Fatal("skipped page does not state the reason")
+	}
+}
+
+// Deferred minor: when building the view fails, an HTML page stating the
+// failure is still written, consistent with a render_failed sidecar.
+func TestOWAFailurePageWritten(t *testing.T) {
+	orig := owaSanitize
+	owaSanitize = func(string, string) (SanitizeResult, error) { return SanitizeResult{}, errors.New("boom in sanitizer") }
+	defer func() { owaSanitize = orig }()
+	cal := parseICS(t, invite("REQUEST", `X-ALT-DESC;FMTTYPE=text/html:<p>x</p>`))
+	dir := t.TempDir()
+	sc, err := WriteOWA(cal, "abc", dir)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if sc.Status != "render_failed" || !strings.Contains(sc.Error, "boom in sanitizer") {
+		t.Fatalf("sidecar %+v", sc)
+	}
+	b, rerr := os.ReadFile(filepath.Join(dir, OWAHTMLName))
+	if rerr != nil {
+		t.Fatalf("no HTML written: %v", rerr)
+	}
+	if !strings.Contains(string(b), "boom in sanitizer") || !strings.Contains(string(b), "Emulated Outlook-on-the-web rendering") {
+		t.Fatalf("failure page lacks reason/footer: %s", b)
 	}
 }

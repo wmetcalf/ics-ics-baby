@@ -45,7 +45,9 @@
 </head>
 <body>
 <div class="owa-pane">
-{{- if .Skipped}}
+{{- if .Failed}}
+  <div class="owa-head"><div class="owa-subject">View failed</div><div class="owa-muted">{{.Reason}}</div></div>
+{{- else if .Skipped}}
   <div class="owa-head"><div class="owa-subject">No meeting view</div><div class="owa-muted">{{.Reason}}</div></div>
 {{- else}}
   <div class="owa-head">

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	htmlstd "html"
 	"html/template"
 	"net/url"
 	"os"
@@ -47,6 +48,9 @@ type Sidecar struct {
 var owaTemplateText string
 
 var owaTemplate = template.Must(template.New("owa").Parse(owaTemplateText))
+
+// owaSanitize is the body sanitizer; a variable so tests can make it fail.
+var owaSanitize = OWASanitize
 
 // SelectEvent picks the event OWA would show as the meeting request.
 // REQUEST, PUBLISH and no METHOD render; CANCEL renders as canceled; any other
@@ -120,6 +124,7 @@ type attachmentView struct {
 
 type owaView struct {
 	Skipped       bool
+	Failed        bool
 	Reason        string
 	Canceled      bool
 	Subject       string
@@ -242,9 +247,9 @@ func WriteOWA(cal *icsparse.CalendarInfo, inputSHA256, outDir string) (Sidecar, 
 	}
 
 	if ev.AltDescRaw != nil && ev.AltDescFmtType != nil && strings.Contains(*ev.AltDescFmtType, "html") {
-		res, err := OWASanitize(*ev.AltDescRaw, filepath.Join(outDir, InlineDirName))
+		res, err := owaSanitize(*ev.AltDescRaw, filepath.Join(outDir, InlineDirName))
 		if err != nil {
-			return sc, err
+			return failView(sc, outDir, fmt.Errorf("sanitize body: %w", err))
 		}
 		view.BodyIsHTML = true
 		view.BodyHTML = template.HTML(res.HTML) // sanitized by OWASanitize
@@ -271,9 +276,28 @@ func WriteOWA(cal *icsparse.CalendarInfo, inputSHA256, outDir string) (Sidecar, 
 	return sc, writeView(outDir, view)
 }
 
+// failView records a build failure in the sidecar and writes a page that
+// states it, so the HTML always exists alongside a render_failed sidecar.
+func failView(sc Sidecar, outDir string, cause error) (Sidecar, error) {
+	sc.Status = "render_failed"
+	sc.Error = cause.Error()
+	view := owaView{Failed: true, Reason: cause.Error(), InputSHA256: sc.InputSHA256}
+	if err := writeView(outDir, view); err != nil {
+		return sc, fmt.Errorf("%v; and writing the failure page: %w", cause, err)
+	}
+	return sc, cause
+}
+
 func writeView(outDir string, view owaView) error {
 	var buf bytes.Buffer
 	if err := owaTemplate.Execute(&buf, view); err != nil {
+		// Last resort: a static page naming the failure.
+		buf.Reset()
+		fmt.Fprintf(&buf, "<!doctype html><meta charset=utf-8><title>view failed</title><p>View failed: %s</p><p>Emulated Outlook-on-the-web rendering — ics-ics-baby · input sha256 %s</p>",
+			htmlstd.EscapeString("render owa template: "+err.Error()), htmlstd.EscapeString(view.InputSHA256))
+		if werr := os.MkdirAll(outDir, 0o755); werr == nil {
+			_ = os.WriteFile(filepath.Join(outDir, OWAHTMLName), buf.Bytes(), 0o644)
+		}
 		return fmt.Errorf("render owa template: %w", err)
 	}
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
