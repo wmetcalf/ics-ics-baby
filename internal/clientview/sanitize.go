@@ -250,6 +250,7 @@ type sanitizer struct {
 	inlineFiles   int               // files in inlineDir, this body's included
 	inlinePixels  int64             // decoded pixels of the kept inline images
 	formatOf      map[string]string // sha256 -> real format of images already charged
+	namedDrops    int               // drop codes carrying attacker names
 	lastCanonical string            // canonical data: URL of the last kept inline image
 	styles        []*html.Node      // sanitized <style> elements, in order
 }
@@ -287,12 +288,21 @@ func (s *sanitizer) drop(what string) {
 	if s.droppedSeen[what] {
 		return
 	}
-	if len(s.dropped) >= maxDropped {
+	// Only codes carrying attacker names are capped: the fixed vocabulary
+	// (links_capped, input_truncated, unstable_markup, ...) always gets in.
+	named := false
+	for _, p := range []string{"attr:", "element:", "css:@", "css:url:"} {
+		named = named || strings.HasPrefix(what, p)
+	}
+	if named && s.namedDrops >= maxDropped {
 		if !s.droppedSeen["dropped_capped"] {
 			s.droppedSeen["dropped_capped"] = true
 			s.dropped = append(s.dropped, "dropped_capped")
 		}
 		return
+	}
+	if named {
+		s.namedDrops++
 	}
 	s.droppedSeen[what] = true
 	s.dropped = append(s.dropped, what)

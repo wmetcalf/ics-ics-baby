@@ -497,7 +497,7 @@ func TestWriteOWAChromeOnlySeparateFile(t *testing.T) {
 	if _, err := WriteOWA(cal, "x", dir); err != nil {
 		t.Fatal(err)
 	}
-	_, p, err := WriteOWAChromeOnly(cal, "x", dir)
+	_, p, err := WriteOWAChromeOnly(cal, "x", dir, false)
 	if err != nil {
 		t.Fatal(err)
 	}

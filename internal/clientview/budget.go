@@ -16,6 +16,7 @@ type buildGuard struct {
 	mu         sync.Mutex
 	abandoned  bool
 	chromeOnly bool   // WriteOWAChromeOnly: no body
+	budgetNote bool   // ... because the build ran out of budget
 	htmlName   string // page file name (default OWAHTMLName)
 }
 

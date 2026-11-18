@@ -1055,3 +1055,23 @@ func TestDroppedBounded(t *testing.T) {
 		}
 	}
 }
+
+// Attacker-named drop codes cannot crowd out the fixed vocabulary.
+func TestDropCapKeepsFixedCodes(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("<p")
+	for i := 0; i < 250; i++ {
+		b.WriteString(" on" + strconv.Itoa(i) + "=1")
+	}
+	b.WriteString(">x</p>")
+	for i := 0; i < maxRecorded+200; i++ {
+		b.WriteString(`<a href="https://e` + strconv.Itoa(i) + `.example/">l</a>`)
+	}
+	res, err := OWASanitize(b.String(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(res.Dropped, "links_capped") || !contains(res.Dropped, "dropped_capped") {
+		t.Fatalf("dropped tail %v", res.Dropped[len(res.Dropped)-3:])
+	}
+}

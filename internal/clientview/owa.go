@@ -194,7 +194,11 @@ func writeOWAGuarded(cal *icsparse.CalendarInfo, inputSHA256, outDir string, g *
 	// the shared inline-image budget.
 	var body *SanitizeResult
 	if ev != nil && g != nil && g.chromeOnly {
-		body = &SanitizeResult{HTML: bodyNotRendered}
+		note := bodyNotRendered
+		if g.budgetNote {
+			note = bodyNotBuilt
+		}
+		body = &SanitizeResult{HTML: note}
 	} else if ev != nil {
 		res, err := sanitizeParts(ev, outDir)
 		if err != nil {
@@ -328,6 +332,10 @@ func writeOWAGuarded(cal *icsparse.CalendarInfo, inputSHA256, outDir string, g *
 // bodyNotRendered stands in for a body whose rendering failed.
 const bodyNotRendered = `<p class="owa-remote-ref">This capture leaves the message body out: the full page did not render. The body is in the HTML view and the sidecar.</p>`
 
+// bodyNotBuilt stands in for a body the view build ran out of budget on:
+// neither the view HTML nor the sidecar holds it then.
+const bodyNotBuilt = `<p class="owa-remote-ref">This capture leaves the message body out: building the view ran out of its time or memory budget. See the manifest and the preview for the body.</p>`
+
 // OWAChromeHTMLName is the page WriteOWAChromeOnly writes.
 const OWAChromeHTMLName = "ics-ics-baby-owa-chrome.html"
 
@@ -339,8 +347,9 @@ const OWAChromeHTMLName = "ics-ics-baby-owa-chrome.html"
 // captured.
 // The sidecar it returns carries the chrome fields (event UID, join URL,
 // other events) but no body evidence.
-func WriteOWAChromeOnly(cal *icsparse.CalendarInfo, inputSHA256, outDir string) (Sidecar, string, error) {
-	sc, err := writeOWAGuarded(cal, inputSHA256, outDir, &buildGuard{chromeOnly: true, htmlName: OWAChromeHTMLName})
+// budgetExceeded selects the note for a body whose build ran out of budget.
+func WriteOWAChromeOnly(cal *icsparse.CalendarInfo, inputSHA256, outDir string, budgetExceeded bool) (Sidecar, string, error) {
+	sc, err := writeOWAGuarded(cal, inputSHA256, outDir, &buildGuard{chromeOnly: true, budgetNote: budgetExceeded, htmlName: OWAChromeHTMLName})
 	return sc, filepath.Join(outDir, OWAChromeHTMLName), err
 }
 

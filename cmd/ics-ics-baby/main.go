@@ -406,8 +406,8 @@ func main() {
 // with a short timeout: the chrome alone renders in about a second.
 // A skipped view is not rendered (there is no PNG for one): its page
 // replaces htmlPath instead. A capture cut at the height cap is recorded.
-func renderOWAChromeOnly(cal *icsparse.CalendarInfo, inputSHA, outDir, htmlPath, pngPath string, width int, opts render.ChromiumSettings) (clientview.Sidecar, error) {
-	chromeSC, chromePath, err := clientview.WriteOWAChromeOnly(cal, inputSHA, outDir)
+func renderOWAChromeOnly(cal *icsparse.CalendarInfo, inputSHA, outDir, htmlPath, pngPath string, width int, opts render.ChromiumSettings, budgetExceeded bool) (clientview.Sidecar, error) {
+	chromeSC, chromePath, err := clientview.WriteOWAChromeOnly(cal, inputSHA, outDir, budgetExceeded)
 	defer os.Remove(chromePath) // a render input only; the view HTML keeps the body
 	if err != nil {
 		return chromeSC, err
@@ -451,7 +451,7 @@ func writeOWAView(cal *icsparse.CalendarInfo, inputSHA, outDir string, width int
 		if slices.Contains(sc.Dropped, "build_budget_exceeded") {
 			// Sanitizing the bodies ran out of budget: still capture the
 			// trusted chrome (its build sanitizes nothing).
-			if csc, ferr := renderOWAChromeOnly(cal, inputSHA, outDir, htmlPath, pngPath, width, opts); ferr == nil {
+			if csc, ferr := renderOWAChromeOnly(cal, inputSHA, outDir, htmlPath, pngPath, width, opts, true); ferr == nil {
 				if csc.Status == "skipped" {
 					csc.Dropped = append([]string{"build_budget_exceeded"}, csc.Dropped...)
 				} else {
@@ -464,6 +464,8 @@ func writeOWAView(cal *icsparse.CalendarInfo, inputSHA, outDir string, width int
 				_ = os.RemoveAll(filepath.Join(outDir, clientview.InlineDirName))
 			} else {
 				_ = os.Remove(pngPath)
+				sc.Error += "; rendering without the body failed too: " + ferr.Error()
+				fmt.Fprintf(os.Stderr, "owa chromium render error (without body): %v\n", ferr)
 			}
 		}
 	}
@@ -489,7 +491,7 @@ func writeOWAView(cal *icsparse.CalendarInfo, inputSHA, outDir string, width int
 			// The body (e.g. CSS too costly to paint) must not cost the
 			// trusted chrome its capture: render the page once more with
 			// the body replaced by a note.
-			if csc, ferr := renderOWAChromeOnly(cal, inputSHA, outDir, htmlPath, pngPath, width, opts); ferr == nil {
+			if csc, ferr := renderOWAChromeOnly(cal, inputSHA, outDir, htmlPath, pngPath, width, opts, false); ferr == nil {
 				sc.Dropped = append(sc.Dropped, "body_render_failed")
 				if slices.Contains(csc.Dropped, "capture_truncated") && !slices.Contains(sc.Dropped, "capture_truncated") {
 					sc.Dropped = append(sc.Dropped, "capture_truncated")

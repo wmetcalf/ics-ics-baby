@@ -747,3 +747,15 @@ func TestCLIInviteViewBudgetSkipped(t *testing.T) {
 		t.Fatal("skipped page not written")
 	}
 }
+
+// The budget fallback's note does not send the analyst to artifacts that
+// lack the body; a failed fallback render is reported.
+func TestCLIInviteViewBudgetFallbackNotes(t *testing.T) {
+	requireChromiumCLI(t)
+	out := filepath.Join(t.TempDir(), "o")
+	res := runCLI(t, "--out", out, "--invite-view", "owa", "--owa-build-timeout", "1ns", "--chromium-bin", "/bin/false", fixtureDir+"11-html-alt-desc.ics")
+	sc := readSidecar(t, out)
+	if res.exit != 1 || !strings.Contains(fmt.Sprint(sc["error"]), "without the body failed") || !strings.Contains(res.stderr, "(without body)") {
+		t.Fatalf("exit %d sidecar %v stderr %s", res.exit, sc, res.stderr)
+	}
+}
