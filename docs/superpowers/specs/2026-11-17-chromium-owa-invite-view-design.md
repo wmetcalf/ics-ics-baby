@@ -267,6 +267,21 @@ Event field names match `email-render`'s `mail-calendar/1` component fields (uid
 location, status, sequence, attendees, attachments, recurrence) so Loadout can join the two
 engines' calendar evidence on `(input_sha256, uid)`.
 
+**Loadout EngineManifest** (`backend/loadout/models.py` `EngineManifest`, registered like `mail.manifests()`):
+
+```text
+name             ics-ics-baby
+accepts          file
+emits            file, screenshot, url, detection
+stages           identify, render, extract
+default_network  none
+accept_magic     ics
+accept_extensions ics, ifb, vcs
+max_input_bytes  25 MiB
+```
+
+Also added to `NO_FALLBACK_ENGINES` and the blastbox host map like the other blastbox engines.
+
 **Loadout mapping** (adapter `backend/loadout/icsbaby.py`, modeled on `boxjs.map_outputs`):
 
 ```text
