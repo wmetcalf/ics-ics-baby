@@ -253,3 +253,32 @@ func TestOWAFailurePageWritten(t *testing.T) {
 		t.Fatalf("failure page lacks reason/footer: %s", b)
 	}
 }
+
+// Gap owa-first-event-only: OWA shows one meeting request, but the evidence of
+// the other events (join URL, remote refs, links) must still reach the sidecar.
+func TestOWAOtherEventEvidence(t *testing.T) {
+	ics := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\n" +
+		"BEGIN:VEVENT\r\nUID:one@test\r\nDTSTART:20260218T100000Z\r\nSUMMARY:First\r\nEND:VEVENT\r\n" +
+		"BEGIN:VEVENT\r\nUID:two@test\r\nDTSTART:20260219T100000Z\r\nSUMMARY:Second\r\n" +
+		"X-MICROSOFT-SKYPETEAMSMEETINGURL:https://evil.test/join2\r\n" +
+		`X-ALT-DESC;FMTTYPE=text/html:<a href="https://evil.test/login">x</a><img src="http://track.test/p.gif">` + "\r\n" +
+		"END:VEVENT\r\nEND:VCALENDAR\r\n"
+	sc, html, _ := writeOWA(t, parseICS(t, ics))
+	if !strings.Contains(html, "First") || strings.Contains(html, "track.test") {
+		t.Fatal("view should render only the first event")
+	}
+	if len(sc.OtherEventDetails) != 1 {
+		t.Fatalf("other_event_details = %+v", sc.OtherEventDetails)
+	}
+	d := sc.OtherEventDetails[0]
+	if d.EventUID != "two@test" || d.Summary != "Second" || d.JoinURL != "https://evil.test/join2" {
+		t.Fatalf("detail %+v", d)
+	}
+	if len(d.RemoteRefs) != 1 || d.RemoteRefs[0].Host != "track.test" || len(d.Links) != 1 || d.Links[0].Host != "evil.test" {
+		t.Fatalf("detail refs/links %+v", d)
+	}
+	b, _ := json.Marshal(sc)
+	if !strings.Contains(string(b), `"other_event_details":[`) {
+		t.Fatalf("json: %s", b)
+	}
+}

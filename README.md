@@ -286,7 +286,7 @@ Outputs, written after the preview outputs:
 
 - `ics-ics-baby-owa.html`: the view
 - `ics-ics-baby-owa.png`: the view rendered with the `chromium` engine and the same isolation (absent when skipped or failed)
-- `ics-ics-baby-owa.json`: the sidecar, with `profile`, `emulation: true`, `status` (`ok`, `skipped` or `render_failed`), `reason`, `error`, `input_sha256`, `event_uid`, `other_events`, `join_url`, `remote_refs` (each with a `kind` of `remote`, `local`, `cid` or `inline_data`), `links`, `dropped` and `blocked_requests`
+- `ics-ics-baby-owa.json`: the sidecar, with `profile`, `emulation: true`, `status` (`ok`, `skipped` or `render_failed`), `reason`, `error`, `input_sha256`, `event_uid`, `other_events`, `other_event_details` (join URL, remote refs and links of the events the view does not render), `join_url`, `remote_refs` (each with a `kind` of `remote`, `local`, `cid` or `inline_data`), `links`, `dropped` and `blocked_requests`
 - `ics-ics-baby-inline/<sha256>.<ext>`: `data:` images from the body, at most 2 MiB each
 
 An OWA failure never removes the preview outputs. The exit code is 1 when a requested render failed and 0 otherwise. A `skipped` view counts as success.

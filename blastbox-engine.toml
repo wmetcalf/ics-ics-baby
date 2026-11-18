@@ -66,7 +66,7 @@ path = "ics-ics-baby-owa.json"
 kind = "file"
 required = true
 role = "client_view_sidecar"
-description = "{profile: owa, emulation: true, status: ok|skipped|render_failed, reason, error, input_sha256, event_uid, other_events, join_url, remote_refs[{kind: remote|local|cid|inline_data, value, host, path, sha256, mime}], links[{href, host, text}], dropped[], blocked_requests[]}."
+description = "{profile: owa, emulation: true, status: ok|skipped|render_failed, reason, error, input_sha256, event_uid, other_events, other_event_details[{event_uid, summary, join_url, remote_refs, links, dropped}] (evidence of the events OWA does not render), join_url, remote_refs[{kind: remote|local|cid|inline_data, value, host, path, sha256, mime}], links[{href, host, text}], dropped[], blocked_requests[]}."
 
 [[artifacts]]
 id = "owa-png"
@@ -318,27 +318,23 @@ source = "ics-ics-baby-findings.json findings[].code"
 
 [[gaps]]
 id = "wrapper-not-built"
-description = "The blastbox engine wrapper and its payload builder are a separate follow-on; this contract is the target it must satisfy. Only the artifact paths and finding codes are produced by the CLI today."
+description = "OWNER DECISION / separate plan (spec: 'The blastbox engine and Loadout adapter are a separate, optional follow-on'). The wrapper (msg-mbox-to-eml/src/mail_engines/, detect/warmup/detonate) and its typed payload builder do not exist yet; every artifact path, sidecar field and finding code above is produced by the CLI today, the payload section is the target the wrapper must build."
 
 [[gaps]]
 id = "owa-emulation-unverified"
-description = "The OWA body sanitizer models known Outlook-on-the-web behaviour but no rule has been measured against real OWA yet (internal/clientview/testdata/owa-probes/README.md). The view is an approximation; the sidecar says emulation: true."
-
-[[gaps]]
-id = "owa-first-event-only"
-description = "With several VEVENTs the OWA view renders the first and lists the others' summaries in other_events; their bodies, join URLs and remote refs are not rendered."
+description = "OWNER DECISION: needs a Microsoft 365 test mailbox and a manual measurement run (internal/clientview/testdata/owa-probes/README.md). Until then every sanitizer rule is modelled, not measured; the sidecar carries emulation: true and consumers must label the OWA PNG as an emulation."
 
 [[gaps]]
 id = "finding-severity-first-pass"
-description = "Finding severities are a first pass by the builder; codes are stable but severities may be retuned."
+description = "OWNER DECISION: severities in the code table (internal/icsparse/findings.go) are the builder's first pass; codes are stable, severities may be retuned against labelled data. Loadout maps severity -> risk (info 0, low 10, medium 35, high 70) and should key rules on code, not severity."
 
 [[gaps]]
 id = "remote-refs-not-fetched"
-description = "Remote images, CSS url(), links and join URLs are recorded as values only (never fetched); link-following belongs to Loadout's email-render and browser engines."
+description = "LOADOUT CONSUMER: by design (spec anti-goal) nothing here is fetched. Loadout's icsbaby.map_outputs should turn these into url artifacts (not fetched) and hand them to its email-render/browser engines for following: owa-sidecar remote_refs[] where kind=remote (value, host), links[].href, join_url, other_event_details[].{join_url, remote_refs[kind=remote].value, links[].href}, and ics-manifest events[].discovered_urls, events[].attachments[].href (URL attachments), events[].conferences[].uri."
 
 [[gaps]]
 id = "no-calendar-conversion"
-description = "MSG/TNEF/vCalendar 1.0 inputs are not converted to ICS here (Loadout email-convert follow-on); vcs input parses only as far as the iCalendar parser accepts it."
+description = "LOADOUT CONSUMER: MSG/TNEF/vCalendar 1.0 inputs must be converted to iCalendar upstream (Loadout email-convert) before routing here. Loadout should route on accept_magic ics plus extensions ics/ifb/vcs and, for MSG/TNEF, run email-convert first and pass the extracted text/calendar part; the engine returns status rejected for input that does not start with BEGIN:VCALENDAR or BEGIN:VCARD."
 
 [[consumers]]
 name = "loadout"

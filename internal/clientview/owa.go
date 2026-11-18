@@ -29,19 +29,32 @@ const (
 // Sidecar describes an OWA view: what was rendered and everything that was
 // neutralized, so a pipeline need not re-parse the HTML.
 type Sidecar struct {
-	Profile         string      `json:"profile"`
-	Emulation       bool        `json:"emulation"`
-	Status          string      `json:"status"` // ok | skipped | render_failed
-	Reason          string      `json:"reason,omitempty"`
-	Error           string      `json:"error,omitempty"`
-	InputSHA256     string      `json:"input_sha256"`
-	EventUID        string      `json:"event_uid,omitempty"`
-	OtherEvents     []string    `json:"other_events,omitempty"`
-	JoinURL         string      `json:"join_url,omitempty"`
-	RemoteRefs      []RemoteRef `json:"remote_refs"`
-	Links           []Link      `json:"links"`
-	Dropped         []string    `json:"dropped"`
-	BlockedRequests []string    `json:"blocked_requests"`
+	Profile     string   `json:"profile"`
+	Emulation   bool     `json:"emulation"`
+	Status      string   `json:"status"` // ok | skipped | render_failed
+	Reason      string   `json:"reason,omitempty"`
+	Error       string   `json:"error,omitempty"`
+	InputSHA256 string   `json:"input_sha256"`
+	EventUID    string   `json:"event_uid,omitempty"`
+	OtherEvents []string `json:"other_events,omitempty"`
+	// OtherEventDetails carries the evidence of the events the view does not
+	// render (OWA shows one meeting request per message).
+	OtherEventDetails []EventEvidence `json:"other_event_details,omitempty"`
+	JoinURL           string          `json:"join_url,omitempty"`
+	RemoteRefs        []RemoteRef     `json:"remote_refs"`
+	Links             []Link          `json:"links"`
+	Dropped           []string        `json:"dropped"`
+	BlockedRequests   []string        `json:"blocked_requests"`
+}
+
+// EventEvidence is the sidecar evidence of an event that is not rendered.
+type EventEvidence struct {
+	EventUID   string      `json:"event_uid,omitempty"`
+	Summary    string      `json:"summary"`
+	JoinURL    string      `json:"join_url,omitempty"`
+	RemoteRefs []RemoteRef `json:"remote_refs"`
+	Links      []Link      `json:"links"`
+	Dropped    []string    `json:"dropped"`
 }
 
 //go:embed owa.html.tmpl
@@ -187,6 +200,11 @@ func WriteOWA(cal *icsparse.CalendarInfo, inputSHA256, outDir string) (Sidecar, 
 			break
 		}
 		sc.OtherEvents = append(sc.OtherEvents, cal.Events[i].Summary)
+		d, err := eventEvidence(&cal.Events[i], outDir)
+		if err != nil {
+			return failView(sc, outDir, fmt.Errorf("sanitize event %d body: %w", i+1, err))
+		}
+		sc.OtherEventDetails = append(sc.OtherEventDetails, d)
 	}
 	view.OtherEvents = sc.OtherEvents
 
@@ -286,6 +304,32 @@ func failView(sc Sidecar, outDir string, cause error) (Sidecar, error) {
 		return sc, fmt.Errorf("%v; and writing the failure page: %w", cause, err)
 	}
 	return sc, cause
+}
+
+// eventEvidence sanitizes an unrendered event's HTML body for its references
+// (writing its inline images like the rendered event's) and its join URL.
+func eventEvidence(ev *icsparse.EventInfo, outDir string) (EventEvidence, error) {
+	d := EventEvidence{Summary: ev.Summary, RemoteRefs: []RemoteRef{}, Links: []Link{}, Dropped: []string{}}
+	if ev.UID != nil {
+		d.EventUID = *ev.UID
+	}
+	d.JoinURL, _ = JoinURL(ev)
+	if ev.AltDescRaw != nil && ev.AltDescFmtType != nil && strings.Contains(*ev.AltDescFmtType, "html") {
+		res, err := owaSanitize(*ev.AltDescRaw, filepath.Join(outDir, InlineDirName))
+		if err != nil {
+			return d, err
+		}
+		if res.RemoteRefs != nil {
+			d.RemoteRefs = res.RemoteRefs
+		}
+		if res.Links != nil {
+			d.Links = res.Links
+		}
+		if res.Dropped != nil {
+			d.Dropped = res.Dropped
+		}
+	}
+	return d, nil
 }
 
 func writeView(outDir string, view owaView) error {
