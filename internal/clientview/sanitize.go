@@ -787,16 +787,14 @@ func (s *sanitizer) atRule(prelude, body string, out *strings.Builder) {
 		out.WriteString(inner.String())
 		out.WriteByte('}')
 	case "font-face":
+		// Fonts are global to the page: a body @font-face could remap the
+		// view's own font families. Record remote sources, drop the rule.
 		for _, m := range cssURL.FindAllStringSubmatch(body, -1) {
 			if u := firstNonEmpty(m[1], m[2], m[3]); !strings.HasPrefix(strings.ToLower(strings.TrimSpace(u)), "data:") {
 				s.cssRef(u)
-				s.drop("css:@font-face_remote")
-				return
 			}
 		}
-		out.WriteString("@font-face{")
-		out.WriteString(s.declarations(body))
-		out.WriteByte('}')
+		s.drop("css:@font-face")
 	default:
 		s.drop("css:@" + name)
 	}

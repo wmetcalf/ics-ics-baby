@@ -316,3 +316,21 @@ func TestRawTextElementsDropped(t *testing.T) {
 		}
 	}
 }
+
+// Deferred minor: body @font-face could remap the view's own fonts with
+// local(); body CSS may not declare fonts at all.
+func TestFontFaceStripped(t *testing.T) {
+	res, err := OWASanitize(`<style>@font-face{font-family:"Segoe UI";src:local(Wingdings)}@font-face{font-family:x;src:url(http://evil.test/f.woff)}p{color:red}</style>`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.ToLower(res.HTML), "@font-face") {
+		t.Fatalf("@font-face survived: %s", res.HTML)
+	}
+	if !strings.Contains(res.HTML, ".owa-body p{color:red}") {
+		t.Fatalf("following rule lost: %s", res.HTML)
+	}
+	if len(res.RemoteRefs) != 1 || res.RemoteRefs[0].Host != "evil.test" {
+		t.Fatalf("remote font not recorded: %+v", res.RemoteRefs)
+	}
+}
