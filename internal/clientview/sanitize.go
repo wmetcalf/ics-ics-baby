@@ -1923,6 +1923,13 @@ func (s *sanitizer) declarations(body string) string {
 			s.drop("css:url_unclosed")
 			continue
 		case strings.Contains(lval, "image-set(") || strings.Contains(lval, "src("):
+			// Dropped, but the URLs it names are evidence.
+			for _, m := range cssQuoted.FindAllStringSubmatch(val, -1) {
+				s.cssRef(firstNonEmpty(m[1], m[2]))
+			}
+			for _, m := range cssURL.FindAllStringSubmatch(val, -1) {
+				s.cssRef(firstNonEmpty(m[1], m[2], m[3]))
+			}
 			s.drop("css:image_set")
 			continue
 		}

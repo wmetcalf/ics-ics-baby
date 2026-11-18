@@ -1024,3 +1024,13 @@ func TestEvidenceClippedAndTokenDataRecorded(t *testing.T) {
 		t.Fatalf("inline data image not recorded: %+v", s.refs)
 	}
 }
+
+func TestImageSetDeclarationRecorded(t *testing.T) {
+	res, err := OWASanitize(`<div style="background-image:image-set('https://set.example/a.png' 1x, &quot;https://set.example/b.png&quot; 2x)">x</div>`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.RemoteRefs) != 2 || strings.Contains(res.HTML, "set.example") {
+		t.Fatalf("refs %+v html %s", res.RemoteRefs, res.HTML)
+	}
+}
