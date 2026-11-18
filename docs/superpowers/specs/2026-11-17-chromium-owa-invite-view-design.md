@@ -172,29 +172,21 @@ no VEVENT (VTODO/VJOURNAL/free-busy only)       → no view; sidecar status "ski
 printed to stderr as `[chromium] blocked: <url>` and do not fail the run; no new output file.
 For the OWA render they go in the sidecar's `blocked_requests`.
 
-### 2e. Perceptual image hashes via rosetta-squint *(added at Will's request)*
+### 2e. Image hashing is the pipeline's job *(Will, 2026-11-17)*
 
-`--image-hashes` writes `ics-ics-baby-hashes.json` with a rosetta-squint `phash` (hash_size 8)
-and `colorhash` (binbits 4) — the same pair Loadout's `image_hashes.py` computes, and
-byte-exact with Python `imagehash` 4.3.2, so values compare directly (Hamming) with Loadout,
-RedTusk and ClippyShot hashes. Hashed images:
+ics-ics-baby computes **no** perceptual hashes and takes no rosetta-squint dependency (it would
+need cgo + libturbojpeg/libwebp and break the static cross-compiled release). Instead it hands
+back every image as a file and Loadout hashes them at ingress (`image_hashes.py`, rosetta-squint
+`phash`/`colorhash`, which it recomputes for worker screenshots anyway):
 
 ```text
 preview      ics-ics-baby-preview.png
 owa          ics-ics-baby-owa.png (when --invite-view)
-attachment   each extracted ATTACH whose detected MIME is an image
-inline       each data: image found in the raw X-ALT-DESC (brand-logo lookalikes)
+attachment   extracted ATTACH files (existing behaviour)
+inline       data: images from the raw X-ALT-DESC, written to ics-ics-baby-inline/
+             (when --invite-view; listed in the sidecar as remote_refs kind "inline_data"
+             with path, sha256, mime; same 2 MiB cap)
 ```
-
-Each entry: `{role, source, sha256, mime, phash, colorhash}` or `{role, source, sha256, error}`
-for undecodable or over-budget images (same caps as Loadout: 32 MiB, 25 MP).
-
-**Build constraint:** the Go port (`github.com/wmetcalf/rosetta-squint/squint/go/squint`) needs
-cgo + system `libturbojpeg` for byte-exact JPEG. To keep the release binary static, hashing is
-compiled only with the `squint` build tag; without it, `--image-hashes` exits with a clear
-"built without squint" error. `build.sh` gains a `squint` target; the blastbox engine image
-builds with the tag. Loadout still recomputes screenshot hashes at ingress (worker hashes are
-not trusted), so the worker-side value is standalone use plus the inline/attachment images.
 
 ### 3. Probe corpus (measurement, not runtime)
 
