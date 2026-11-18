@@ -618,3 +618,19 @@ func TestCLIListFindingCodes(t *testing.T) {
 		t.Fatalf("codes = %v", codes)
 	}
 }
+
+// A requested findings file that cannot be written is a failed run, not a
+// silent success with missing (or a previous run's) detections.
+func TestCLIFindingsJSONWriteFailure(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "o")
+	if err := os.MkdirAll(filepath.Join(out, "ics-ics-baby-findings.json", "blocker"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res := runCLI(t, "--out", out, "--findings-json", fixtureDir+"09-combo-spoof-urgent.ics")
+	if res.exit != 1 || !strings.Contains(res.stderr, "failed to write findings") {
+		t.Fatalf("exit %d stderr %q", res.exit, res.stderr)
+	}
+	if strings.Contains(res.stdout, "Wrote findings:") {
+		t.Fatalf("stdout claims findings were written: %s", res.stdout)
+	}
+}

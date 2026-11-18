@@ -273,14 +273,24 @@ func main() {
 	inputSHA := cal.InputSHA256 // hash of the exact bytes parsed
 
 	findingsPath := ""
+	findingsFailed := false
 	if findingsJSON {
 		p := filepath.Join(outDir, "ics-ics-baby-findings.json")
-		b, err := json.MarshalIndent(icsparse.FindingsDoc(cal, inputSHA), "", "  ")
+		// A previous run's findings must not survive a failed write.
+		err := os.Remove(p)
+		if errors.Is(err, os.ErrNotExist) {
+			err = nil
+		}
+		var b []byte
+		if err == nil {
+			b, err = json.MarshalIndent(icsparse.FindingsDoc(cal, inputSHA), "", "  ")
+		}
 		if err == nil {
 			err = os.WriteFile(p, append(b, '\n'), 0o644)
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "failed to write findings: %v\n", err)
+			findingsFailed = true
 		} else {
 			findingsPath = p
 		}
@@ -380,7 +390,7 @@ func main() {
 	for _, line := range owaWritten {
 		fmt.Println(line)
 	}
-	if previewFailed || owaFailed {
+	if previewFailed || owaFailed || findingsFailed {
 		os.Exit(1)
 	}
 }
