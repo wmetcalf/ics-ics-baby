@@ -95,12 +95,14 @@ func main() {
 	var inviteView string
 	var findingsJSON bool
 	var maxAttachments int
+	var listFindingCodes bool
 
 	flag.StringVar(&outDir, "out", "out", "Output directory")
 	flag.StringVar(&screenshot, "screenshot", "", "Output PNG path (default: OUT/preview.png)")
 	flag.StringVar(&htmlOut, "html", "", "Output HTML path (default: OUT/preview.html)")
 	flag.BoolVar(&download, "download-attachments", false, "Download URL attachments")
 	flag.Int64Var(&maxAttachBytes, "max-attachment-bytes", 100<<20, "Maximum size to allow per attachment in bytes (default 100 MiB)")
+	flag.BoolVar(&listFindingCodes, "list-finding-codes", false, "Print every finding code and its severity as JSON, then exit")
 	flag.IntVar(&maxAttachments, "max-attachments", 0, "Maximum number of attachment files saved per calendar (0 = unlimited)")
 	flag.Int64Var(&maxICSBytes, "max-ics-bytes", 500<<20, "Maximum size to allow for ICS file in bytes (default 500 MiB)")
 	flag.StringVar(&tzDefault, "timezone", "", "Default timezone for naive dates (e.g., America/Chicago)")
@@ -134,6 +136,13 @@ func main() {
 		}
 	}
 
+	if listFindingCodes {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(icsparse.FindingCodes()) // map keys are emitted sorted
+		return
+	}
+
 	if download {
 		fmt.Fprintln(os.Stderr, "warning: --download-attachments will contact remote hosts; enable only for trusted invites and networks.")
 	}
@@ -158,6 +167,7 @@ func main() {
 		fmt.Println("  --max-attachments N             Maximum attachment files saved per calendar (default: unlimited)")
 		fmt.Println("  --max-ics-bytes N               Maximum ICS file size in bytes (default: 500 MiB)")
 		fmt.Println("\nClient view options:")
+		fmt.Println("  --list-finding-codes            Print every finding code and severity as JSON and exit")
 		fmt.Println("  --findings-json                 Also write stable-coded findings (ics-ics-baby-findings.json)")
 		fmt.Println("  --invite-view owa               Also write an emulated Outlook-on-the-web view (HTML, sidecar JSON, PNG via Chromium)")
 		fmt.Println("\nScreenshot engine options:")

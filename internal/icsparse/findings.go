@@ -123,3 +123,12 @@ func FindingsDoc(cal *CalendarInfo, inputSHA256 string) map[string]any {
 		"findings":       all,
 	}
 }
+
+// FindingCodes returns every finding code and its severity.
+func FindingCodes() map[string]string {
+	out := make(map[string]string, len(findingCodes))
+	for code, meta := range findingCodes {
+		out[code] = meta.Severity
+	}
+	return out
+}

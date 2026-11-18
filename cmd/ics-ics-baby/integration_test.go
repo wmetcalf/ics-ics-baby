@@ -602,3 +602,19 @@ func TestCLIMaxAttachments(t *testing.T) {
 		t.Fatalf("files=%d stderr=%q", len(ents), res.stderr)
 	}
 }
+
+// The engine contract (kept with the blastbox engine) checks its detection
+// codes against this list, so the code table stays the single source.
+func TestCLIListFindingCodes(t *testing.T) {
+	res := runCLI(t, "--list-finding-codes")
+	if res.exit != 0 {
+		t.Fatalf("exit %d: %s", res.exit, res.stderr)
+	}
+	var codes map[string]string
+	if err := json.Unmarshal([]byte(res.stdout), &codes); err != nil {
+		t.Fatalf("stdout not JSON: %v: %s", err, res.stdout)
+	}
+	if codes["teams_url_hijack"] != "high" || codes["display_alarm"] != "info" || len(codes) < 40 {
+		t.Fatalf("codes = %v", codes)
+	}
+}
