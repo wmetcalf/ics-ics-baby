@@ -5,6 +5,7 @@ import (
 	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -175,5 +176,46 @@ func TestChromiumBlockedReturnedOnError(t *testing.T) {
 	}
 	if !containsSuffix(blocked, "/evidence.gif") {
 		t.Fatalf("blocked = %v on error, want the /evidence.gif URL", blocked)
+	}
+}
+
+// chromedp appends --no-sandbox for root unless the flag is set explicitly,
+// so the sandbox must be pinned on unless --chromium-no-sandbox was given.
+func TestChromiumSandboxFlagExplicit(t *testing.T) {
+	for _, noSandbox := range []bool{false, true} {
+		var got any
+		found := false
+		for _, f := range chromiumFlags(noSandbox) {
+			if f.name == "no-sandbox" {
+				got, found = f.value, true
+			}
+		}
+		if !found || got != noSandbox {
+			t.Fatalf("NoSandbox=%v: no-sandbox flag = %v (set %v), want explicit %v", noSandbox, got, found, noSandbox)
+		}
+	}
+}
+
+// Windows drive-letter paths need file:///C:/... and must round-trip through
+// the allowlist (exercised with slash paths so it runs on every OS).
+func TestFileURLDriveLetter(t *testing.T) {
+	if got := fileURL("C:/dir/page.html"); got != "file:///C:/dir/page.html" {
+		t.Fatalf("fileURL = %q", got)
+	}
+	if got := fileURL("/tmp/page.html"); got != "file:///tmp/page.html" {
+		t.Fatalf("fileURL = %q", got)
+	}
+	for raw, want := range map[string]string{
+		"file:///C:/dir/page.html": "C:/dir/page.html",
+		"file:///c:/dir/page.html": "c:/dir/page.html",
+		"file:///tmp/page.html":    "/tmp/page.html",
+	} {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := fileURLSlashPath(u); got != want {
+			t.Fatalf("fileURLSlashPath(%q) = %q, want %q", raw, got, want)
+		}
 	}
 }

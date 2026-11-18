@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -101,40 +102,14 @@ func RenderHTMLWithChromium(htmlPath, pngPath string, width int, opts ChromiumSe
 	}
 	defer os.RemoveAll(profileDir)
 
-	pageURL := (&url.URL{Scheme: "file", Path: filepath.ToSlash(absHTML)}).String()
+	pageURL := fileURL(absHTML)
 
 	allocOpts := []chromedp.ExecAllocatorOption{
 		chromedp.ExecPath(bin),
 		chromedp.UserDataDir(profileDir),
-		chromedp.Flag("headless", "new"),
-		chromedp.Flag("hide-scrollbars", true),
-		chromedp.Flag("mute-audio", true),
-		chromedp.Flag("disable-gpu", true),
-		chromedp.Flag("no-first-run", true),
-		chromedp.Flag("no-default-browser-check", true),
-		chromedp.Flag("disable-extensions", true),
-		chromedp.Flag("disable-background-networking", true),
-		chromedp.Flag("disable-sync", true),
-		chromedp.Flag("disable-default-apps", true),
-		chromedp.Flag("disable-component-update", true),
-		chromedp.Flag("disable-domain-reliability", true),
-		chromedp.Flag("disable-breakpad", true),
-		chromedp.Flag("disable-client-side-phishing-detection", true),
-		chromedp.Flag("disable-dev-shm-usage", true),
-		chromedp.Flag("metrics-recording-only", true),
-		chromedp.Flag("safebrowsing-disable-auto-update", true),
-		chromedp.Flag("password-store", "basic"),
-		chromedp.Flag("use-mock-keychain", true),
-		chromedp.Flag("force-color-profile", "srgb"),
-		// Network belt and braces: dead proxy (loopback included) and no DNS.
-		chromedp.Flag("proxy-server", "127.0.0.1:9"),
-		chromedp.Flag("proxy-bypass-list", "<-loopback>"),
-		chromedp.Flag("host-resolver-rules", "MAP * ~NOTFOUND"),
-		// JavaScript off at the engine level too (Emulation below is per page).
-		chromedp.Flag("blink-settings", "scriptEnabled=false"),
 	}
-	if opts.NoSandbox {
-		allocOpts = append(allocOpts, chromedp.NoSandbox)
+	for _, f := range chromiumFlags(opts.NoSandbox) {
+		allocOpts = append(allocOpts, chromedp.Flag(f.name, f.value))
 	}
 
 	// The timeout bounds the whole browser lifetime; cancelling the allocator
@@ -238,6 +213,47 @@ func RenderHTMLWithChromium(htmlPath, pngPath string, width int, opts ChromiumSe
 	return blocked, nil
 }
 
+type chromiumFlag struct {
+	name  string
+	value any
+}
+
+// chromiumFlags are the browser command-line flags. no-sandbox is always set
+// explicitly: left unset, chromedp adds --no-sandbox whenever it runs as
+// root, silently dropping the sandbox. As root without --chromium-no-sandbox
+// Chromium then refuses to start, which fails closed.
+func chromiumFlags(noSandbox bool) []chromiumFlag {
+	return []chromiumFlag{
+		{"headless", "new"},
+		{"hide-scrollbars", true},
+		{"mute-audio", true},
+		{"disable-gpu", true},
+		{"no-first-run", true},
+		{"no-default-browser-check", true},
+		{"disable-extensions", true},
+		{"disable-background-networking", true},
+		{"disable-sync", true},
+		{"disable-default-apps", true},
+		{"disable-component-update", true},
+		{"disable-domain-reliability", true},
+		{"disable-breakpad", true},
+		{"disable-client-side-phishing-detection", true},
+		{"disable-dev-shm-usage", true},
+		{"metrics-recording-only", true},
+		{"safebrowsing-disable-auto-update", true},
+		{"password-store", "basic"},
+		{"use-mock-keychain", true},
+		{"force-color-profile", "srgb"},
+		// Network belt and braces: dead proxy (loopback included) and no DNS.
+		{"proxy-server", "127.0.0.1:9"},
+		{"proxy-bypass-list", "<-loopback>"},
+		{"host-resolver-rules", "MAP * ~NOTFOUND"},
+		// JavaScript off at the engine level too (Emulation below is per page).
+		{"blink-settings", "scriptEnabled=false"},
+		{"no-sandbox", noSandbox},
+	}
+}
+
 // allowedRequest permits exactly the HTML file being rendered and data: URLs.
 func allowedRequest(raw, absHTML string) bool {
 	if strings.HasPrefix(strings.ToLower(raw), "data:") {
@@ -250,7 +266,31 @@ func allowedRequest(raw, absHTML string) bool {
 	if u.RawQuery != "" || u.Fragment != "" {
 		return false
 	}
-	return filepath.Clean(filepath.FromSlash(u.Path)) == absHTML
+	got := filepath.Clean(filepath.FromSlash(fileURLSlashPath(u)))
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(got, absHTML)
+	}
+	return got == absHTML
+}
+
+// fileURL is the file: URL of an absolute path. A Windows drive path
+// (C:\dir\page.html) needs a leading slash: file:///C:/dir/page.html.
+func fileURL(absPath string) string {
+	p := filepath.ToSlash(absPath)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return (&url.URL{Scheme: "file", Path: p}).String()
+}
+
+// fileURLSlashPath is the slash path of a file: URL, without the leading
+// slash before a Windows drive letter (/C:/dir -> C:/dir).
+func fileURLSlashPath(u *url.URL) string {
+	p := u.Path
+	if len(p) >= 3 && p[0] == '/' && p[2] == ':' && (p[1] >= 'a' && p[1] <= 'z' || p[1] >= 'A' && p[1] <= 'Z') {
+		return p[1:]
+	}
+	return p
 }
 
 func chromiumErr(tctx context.Context, timeout time.Duration, step string, err error) error {
