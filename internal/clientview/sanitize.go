@@ -737,7 +737,34 @@ func (s *sanitizer) stylesheet(css string) string {
 	css = cssComment.ReplaceAllString(css, "")
 	var out strings.Builder
 	s.ruleList(css, &out, 0)
+	if badCSSString(out.String()) {
+		// Every piece is checked below; this guards the assembled sheet.
+		s.drop("css:bad_string")
+		return ""
+	}
 	return out.String()
+}
+
+// badCSSString reports whether s has a quoted string that a CSS tokenizer
+// ends early: at a raw newline (a bad-string token) or at the end of s. The
+// sanitizer reads quotes without that rule, so such a string could hide
+// braces from it that Chromium then sees as top-level, unscoped rules.
+func badCSSString(s string) bool {
+	var quote byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			} else if c == '\n' || c == '\r' || c == '\f' {
+				return true
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		}
+	}
+	return quote != 0
 }
 
 // ruleList sanitizes a rule list nested inside depth group rules. The depth
@@ -781,6 +808,10 @@ func (s *sanitizer) ruleList(css string, out *strings.Builder, depth int) {
 			close++
 		}
 		i = close
+		if badCSSString(prelude) {
+			s.drop("css:bad_string")
+			continue
+		}
 		if strings.HasPrefix(prelude, "@") {
 			s.atRule(prelude, body, out, depth)
 			continue
@@ -923,6 +954,9 @@ func (s *sanitizer) declarations(body string) string {
 		switch {
 		case strings.Contains(d, `\`):
 			s.drop("css:escaped_declaration")
+			continue
+		case badCSSString(d):
+			s.drop("css:bad_string")
 			continue
 		case strings.ContainsAny(d, "{}"):
 			// A nested style rule would escape the checks below.

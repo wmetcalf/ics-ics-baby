@@ -19,7 +19,30 @@ func TestOWABodyCannotPaintOverChrome(t *testing.T) {
 	}
 	body := `<style>body{overflow:visible!important;z-index:9;margin-top:-600px!important;background:#ff0000} .o{--p:fixed;position:var(--p);top:0;left:0;width:3000px;height:400px;background:#ff0000}</style>` +
 		`<div style="position:absolute;top:-600px;left:0;width:3000px;height:600px;background:#ff0000">X</div><div class="o">Y</div><p>hello</p>`
-	esc := strings.NewReplacer(`\`, `\\`, ";", `\;`, ",", `\,`).Replace(body)
+	assertHeaderClean(t, body)
+}
+
+// A CSS string ends at a raw newline (a bad-string token), so quotes the
+// sanitizer reads as one string can let Chromium see the rest as top-level,
+// unscoped rules. Selector, declaration and @media prelude variants.
+func TestOWABodyBadStringCannotEscapeScope(t *testing.T) {
+	if _, err := render.FindChromium(""); err != nil {
+		t.Skipf("headless Chromium not available: %v", err)
+	}
+	for name, css := range map[string]string{
+		"selector":    "p[title=\"x\n]{}.owa-head, .owa-pane{background:#ff0000!important}\np[title=\"]{color:blue}",
+		"declaration": "p{content:\"x\n}.owa-head, .owa-pane{background:#ff0000!important}\np{content:\"}",
+		"media":       "@media all and (min-width:\"1\n){}.owa-head, .owa-pane{background:#ff0000!important}\n@media \"){p{color:blue}}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertHeaderClean(t, "<style>"+css+"</style><p>hello</p>")
+		})
+	}
+}
+
+func assertHeaderClean(t *testing.T, body string) {
+	t.Helper()
+	esc := strings.NewReplacer(`\`, `\\`, ";", `\;`, ",", `\,`, "\n", `\n`).Replace(body)
 	cal := parseICS(t, invite("REQUEST", "X-ALT-DESC;FMTTYPE=text/html:"+esc))
 	dir := t.TempDir()
 	if _, err := WriteOWA(cal, "x", dir); err != nil {

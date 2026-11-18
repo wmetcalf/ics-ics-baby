@@ -438,3 +438,22 @@ func TestSVGImageDataHrefKept(t *testing.T) {
 		t.Fatalf("RemoteRefs = %+v", res.RemoteRefs)
 	}
 }
+
+// Unit form of TestOWABodyBadStringCannotEscapeScope: no sanitized style
+// sheet may carry a string that a CSS tokenizer ends at a newline.
+func TestBadCSSStringDropped(t *testing.T) {
+	for _, css := range []string{
+		"p[title=\"x\n]{}.owa-head{color:red}\np[title=\"]{color:blue}",
+		"p{content:\"x\n}.owa-head{color:red}\np{content:\"}",
+		"@media (min-width:\"1\n){}.owa-head{color:red}\n@media \"){p{color:blue}}",
+		"p{color:red}q{content:'x\r'}",
+	} {
+		res, err := OWASanitize("<style>"+css+"</style><p>x</p>", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(res.HTML, "owa-head") || !contains(res.Dropped, "css:bad_string") {
+			t.Fatalf("%q -> %s / %v", css, res.HTML, res.Dropped)
+		}
+	}
+}
