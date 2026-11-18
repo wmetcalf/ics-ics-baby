@@ -55,8 +55,9 @@ const (
 	maxRecorded         = 1000    // remote refs / links recorded
 	maxLabel            = 120     // characters of a value shown in a placeholder
 	maxLinkText         = 200
-	maxCSSNesting       = 16 // nested @media/@supports kept
-	depthHeadroom       = 32 // parser stack used by html/context/implied elements
+	maxCSSNesting       = 16   // nested @media/@supports kept
+	maxInlineImages     = 1000 // data: image files written per body
+	depthHeadroom       = 32   // parser stack used by html/context/implied elements
 	outputSlack         = 4096
 )
 
@@ -124,6 +125,7 @@ type sanitizer struct {
 	dropped     []string
 	droppedSeen map[string]bool
 	capped      bool
+	inlineSeen  map[string]bool // inline image files written
 }
 
 func newSanitizer(inlineDir string) *sanitizer {
@@ -133,6 +135,7 @@ func newSanitizer(inlineDir string) *sanitizer {
 		refSeen:     map[string]bool{},
 		linkSeen:    map[string]bool{},
 		droppedSeen: map[string]bool{},
+		inlineSeen:  map[string]bool{},
 	}
 }
 
@@ -594,6 +597,13 @@ func (s *sanitizer) styleElement(n *html.Node) {
 func (s *sanitizer) classify(raw string) RemoteRef {
 	v := strings.TrimSpace(raw)
 	switch schemeOf(v) {
+	case "data":
+		// Self-contained; record only the media type, never the payload.
+		mime := strings.ToLower(strings.TrimSpace(v[strings.IndexByte(v, ':')+1:]))
+		if i := strings.IndexAny(mime, ";,"); i >= 0 {
+			mime = mime[:i]
+		}
+		return RemoteRef{Kind: "inline_data", Value: "data:" + strings.TrimSpace(mime)}
 	case "cid":
 		return RemoteRef{Kind: "cid", Value: v}
 	case "file":
@@ -689,6 +699,11 @@ func (s *sanitizer) inlineImage(raw string) (RemoteRef, bool) {
 	r := RemoteRef{Kind: "inline_data", Value: "data:" + mime, SHA256: sha, Mime: mime}
 	if s.inlineDir != "" {
 		name := sha + "." + ext
+		if !s.inlineSeen[name] && len(s.inlineSeen) >= maxInlineImages {
+			s.drop("inline_images_capped")
+			return RemoteRef{}, false
+		}
+		s.inlineSeen[name] = true
 		if err := os.MkdirAll(s.inlineDir, 0o755); err == nil {
 			if err := os.WriteFile(filepath.Join(s.inlineDir, name), data, 0o644); err == nil {
 				r.Path = filepath.ToSlash(filepath.Join(filepath.Base(s.inlineDir), name))
@@ -903,6 +918,10 @@ func (s *sanitizer) declarations(body string) string {
 		switch {
 		case strings.Contains(d, `\`):
 			s.drop("css:escaped_declaration")
+			continue
+		case strings.ContainsAny(d, "{}"):
+			// A nested style rule would escape the checks below.
+			s.drop("css:nested_rule")
 			continue
 		case prop == "behavior" || prop == "-moz-binding" || strings.Contains(lval, "expression("):
 			s.drop("css:script_like")
@@ -1137,12 +1156,40 @@ func prefixTokens(v string) string {
 	return strings.Join(f, " ")
 }
 
+// splitSrcset returns the candidate URLs of a srcset the way the HTML
+// srcset parser reads them: a URL is a run of non-space characters (so a
+// data: URL keeps its commas), and its descriptors run to the next comma.
 func splitSrcset(v string) []string {
 	var out []string
-	for _, cand := range strings.Split(v, ",") {
-		f := strings.Fields(cand)
-		if len(f) > 0 {
-			out = append(out, f[0])
+	i := 0
+	for i < len(v) {
+		for i < len(v) && (isCSSSpace(v[i]) || v[i] == ',') {
+			i++
+		}
+		start := i
+		for i < len(v) && !isCSSSpace(v[i]) {
+			i++
+		}
+		u := v[start:i]
+		if u == "" {
+			break
+		}
+		if trimmed := strings.TrimRight(u, ","); trimmed != u {
+			out = append(out, trimmed)
+			continue
+		}
+		out = append(out, u)
+		paren := false
+		for i < len(v) {
+			c := v[i]
+			if c == '(' {
+				paren = true
+			} else if c == ')' {
+				paren = false
+			} else if c == ',' && !paren {
+				break
+			}
+			i++
 		}
 	}
 	return out

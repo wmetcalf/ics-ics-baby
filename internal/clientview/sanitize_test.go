@@ -367,3 +367,60 @@ func TestCSSNestingBounded(t *testing.T) {
 		t.Fatalf("shallow nesting mangled: %s / %v", res.HTML, res.Dropped)
 	}
 }
+
+// data: candidates in srcset are self-contained, not remote references.
+func TestSrcsetDataNotRemote(t *testing.T) {
+	res, err := OWASanitize(`<img srcset="data:image/png;base64,`+onePxPNG+` 1x, http://evil.test/a.png 2x">`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range res.RemoteRefs {
+		if strings.HasPrefix(strings.ToLower(r.Value), "data:") && r.Kind != "inline_data" {
+			t.Fatalf("data: srcset candidate recorded as %q: %+v", r.Kind, res.RemoteRefs)
+		}
+	}
+	if len(res.RemoteRefs) != 1 || res.RemoteRefs[0].Host != "evil.test" {
+		t.Fatalf("RemoteRefs = %+v", res.RemoteRefs)
+	}
+}
+
+// The number of inline image files written per body is bounded: 2 MiB of
+// distinct tiny images must not become tens of thousands of files.
+func TestInlineImageFilesCapped(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ics-ics-baby-inline")
+	var b strings.Builder
+	for i := 0; i < maxInlineImages+50; i++ {
+		// distinct payloads: a GIF header followed by a counter
+		data := []byte("GIF89a" + strings.Repeat("x", 4) + string(rune('a'+i%26)) + strings.Repeat("y", i/26))
+		b.WriteString(`<img src="data:image/gif;base64,` + base64.StdEncoding.EncodeToString(data) + `">`)
+	}
+	res, err := OWASanitize(b.String(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ents, _ := os.ReadDir(dir)
+	if len(ents) > maxInlineImages {
+		t.Fatalf("wrote %d inline files, cap %d", len(ents), maxInlineImages)
+	}
+	if !contains(res.Dropped, "inline_images_capped") {
+		t.Fatalf("dropped = %v", res.Dropped)
+	}
+	if n := strings.Count(res.HTML, "<img"); n > maxInlineImages {
+		t.Fatalf("kept %d inline images past the cap", n)
+	}
+}
+
+// Nested style rules inside a declaration block would bypass the
+// declaration-level rules (e.g. position:fixed); they are dropped.
+func TestNestedRuleInDeclarationsDropped(t *testing.T) {
+	res, err := OWASanitize(`<style>p{color:red;& ~ div{position:fixed;top:0}}</style><p>x</p>`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.HTML, "fixed") || !contains(res.Dropped, "css:nested_rule") {
+		t.Fatalf("nested rule survived: %s / %v", res.HTML, res.Dropped)
+	}
+	if !strings.Contains(res.HTML, ".owa-body p{color:red}") {
+		t.Fatalf("plain declaration lost: %s", res.HTML)
+	}
+}
