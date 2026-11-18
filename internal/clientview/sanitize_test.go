@@ -841,3 +841,41 @@ func TestDepthCutForeignRules(t *testing.T) {
 		t.Fatalf("dropped %v", res.Dropped)
 	}
 }
+
+// Round-5 lens: GIF frames larger than the logical screen, filter blur,
+// stack-scan cost.
+func TestGIFFrameSizeCharged(t *testing.T) {
+	// Logical screen 1x1, one 8000x8000 frame (8000x8000 > 16M pixels).
+	var b bytes.Buffer
+	b.WriteString("GIF89a")
+	b.Write([]byte{1, 0, 1, 0, 0, 0, 0}) // screen 1x1, no global table
+	b.Write([]byte{0x2C, 0, 0, 0, 0, 0x40, 0x1F, 0x40, 0x1F, 0x80})
+	b.Write([]byte{0, 0, 0, 255, 255, 255}) // 2-entry local table
+	b.Write([]byte{2, 2, 0x4C, 0x01, 0})    // LZW min size 2, one tiny sub-block
+	b.WriteByte(0x3B)
+	w, h, ok := imageSize(b.Bytes())
+	if !ok || int64(w)*int64(h) < 8000*8000 {
+		t.Fatalf("imageSize = %d x %d (%v), want the 8000x8000 frame", w, h, ok)
+	}
+}
+
+func TestFilterDropped(t *testing.T) {
+	res, err := OWASanitize(`<style>.a{filter:blur(20px);color:red}</style><div class="a" style="backdrop-filter:blur(9px);-webkit-filter:blur(3px)">x</div>`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.HTML, "blur") || !contains(res.Dropped, "css:filter") {
+		t.Fatalf("%s / %v", res.HTML, res.Dropped)
+	}
+}
+
+func TestStackScanCostBounded(t *testing.T) {
+	in := strings.Repeat("<div>", 470) + strings.Repeat("<hr>", 500000)
+	start := time.Now()
+	if _, err := OWASanitize(in, ""); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("took %v", d)
+	}
+}

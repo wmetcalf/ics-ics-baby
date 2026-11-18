@@ -65,6 +65,7 @@ const (
 	maxInlinePixels      = 16 << 20 // decoded pixels per inline image (e.g. 4096x4096)
 	maxInlinePixelsTotal = 64 << 20 // decoded pixels of all inline images of a body
 	maxMergedText        = 32 << 20 // bytes copied merging adjacent text in the parser
+	maxStackScan         = 32 << 20 // open-stack entries the parser's scope checks walk
 	maxInlineImages      = 1000     // data: image files written per body
 	depthHeadroom        = 32       // parser stack used by html/context/implied elements
 	outputSlack          = 4096
@@ -535,7 +536,7 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 		stack = stack[:i]
 	}
 	off := 0
-	rebuilt := 0
+	rebuilt, scanned := 0, 0
 	// The parser appends each text token to an adjacent text node
 	// (n.Data += text) when only ignored tags separate them: "a</x>" or
 	// "a<tr>" (outside a table) x 400k copies quadratically. Track the
@@ -560,7 +561,12 @@ func depthCut(raw string, max int, strict bool) (int, bool) {
 		}
 		if tt == html.StartTagToken || tt == html.SelfClosingTagToken || tt == html.TextToken || tt == html.EndTagToken {
 			rebuilt += nFmt
-			if rebuilt > maxRebuiltNodes || depth() > max {
+			if tt != html.TextToken {
+				// The parser scans the open stack for scope on most tags
+				// (<hr>, </p>, </li>, ...): charge its depth.
+				scanned += len(stack)
+			}
+			if rebuilt > maxRebuiltNodes || scanned > maxStackScan || depth() > max {
 				return off, true
 			}
 		}
@@ -897,6 +903,9 @@ func (s *sanitizer) hoistStyles(root *html.Node) {
 // decodes more BMP variants than x/image/bmp, so a BMP header is read
 // directly when DecodeConfig gives up.
 func imageSize(data []byte) (w, h int, ok bool) {
+	if len(data) >= 6 && (string(data[:6]) == "GIF87a" || string(data[:6]) == "GIF89a") {
+		return gifSize(data)
+	}
 	if cfg, _, err := image.DecodeConfig(bytes.NewReader(data)); err == nil {
 		return cfg.Width, cfg.Height, true
 	}
@@ -919,6 +928,67 @@ func imageSize(data []byte) (w, h int, ok bool) {
 		return 0, 0, false
 	}
 	return int(ww), int(hh), true
+}
+
+// gifSize is the size a browser decodes a GIF at: the logical screen grown
+// to hold every frame (a 1x1 screen can carry a 16384x16384 frame).
+func gifSize(d []byte) (w, h int, ok bool) {
+	le16 := func(i int) int { return int(d[i]) | int(d[i+1])<<8 }
+	if len(d) < 13 {
+		return 0, 0, false
+	}
+	w, h = le16(6), le16(8)
+	i := 13
+	if d[10]&0x80 != 0 {
+		i += 3 << (d[10]&7 + 1)
+	}
+	skipBlocks := func() bool {
+		for i < len(d) {
+			n := int(d[i])
+			i++
+			if n == 0 {
+				return true
+			}
+			i += n
+		}
+		return false
+	}
+	for frames := 0; i < len(d); {
+		switch d[i] {
+		case 0x3B: // trailer
+			return w, h, w > 0 && h > 0
+		case 0x21: // extension
+			i += 2
+			if !skipBlocks() {
+				return w, h, w > 0 && h > 0
+			}
+		case 0x2C: // image descriptor
+			if i+10 > len(d) { // truncated: the frame never decodes
+				return w, h, w > 0 && h > 0
+			}
+			if r := le16(i+1) + le16(i+5); r > w {
+				w = r
+			}
+			if b := le16(i+3) + le16(i+7); b > h {
+				h = b
+			}
+			packed := d[i+9]
+			i += 10
+			if packed&0x80 != 0 {
+				i += 3 << (packed&7 + 1)
+			}
+			i++ // LZW minimum code size
+			if !skipBlocks() {
+				return w, h, w > 0 && h > 0
+			}
+			if frames++; frames > 10000 {
+				return 0, 0, false
+			}
+		default:
+			return w, h, w > 0 && h > 0
+		}
+	}
+	return w, h, w > 0 && h > 0
 }
 
 // inForeign reports whether n is, or sits inside, an <svg>/<math> element.
@@ -1606,6 +1676,11 @@ func (s *sanitizer) declarations(body string) string {
 		case strings.ContainsAny(d, "{}"):
 			// A nested style rule would escape the checks below.
 			s.drop("css:nested_rule")
+			continue
+		case prop == "filter" || prop == "backdrop-filter" || prop == "-webkit-filter" || prop == "-webkit-backdrop-filter":
+			// Nested blurs cost seconds each to paint: a few hundred bytes
+			// pushed the render past its timeout, so no view was captured.
+			s.drop("css:filter")
 			continue
 		case prop == "behavior" || prop == "-moz-binding" || strings.Contains(lval, "expression("):
 			s.drop("css:script_like")
