@@ -13,8 +13,9 @@ import (
 // set (under mu, which writeView also holds while writing), that build's
 // goroutine writes no page over the failure page.
 type buildGuard struct {
-	mu        sync.Mutex
-	abandoned bool
+	mu         sync.Mutex
+	abandoned  bool
+	chromeOnly bool // WriteOWAChromeOnly: no body
 }
 
 // WriteOWABudgeted is WriteOWA bounded in time and Go heap. The sanitizer

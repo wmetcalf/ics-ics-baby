@@ -40,6 +40,12 @@
   .owa-attach, .owa-other { padding: 12px 24px; border-bottom: 1px solid #edebe9; }
   .owa-attach li span { color: #616161; }
   .owa-emulation { padding: 6px 24px; font-size: 11px; color: #8a8886; border-bottom: 1px solid #edebe9; }
+  /* Attacker-sized text in the chrome is clipped so it cannot push the
+     rest of the chrome past the capture height. */
+  .owa-subject, .owa-from-name, .owa-from-addr { max-height: 84px; overflow: hidden; }
+  .owa-meta-text { max-height: 120px; overflow: hidden; }
+  .owa-join-raw, .owa-join-host { max-height: 60px; overflow: hidden; }
+  .owa-people li, .owa-attach li, .owa-other li { max-height: 40px; overflow: hidden; }
   .owa-footer { padding: 10px 24px 16px 24px; font-size: 11px; color: #8a8886; }
   .owa-footer code { font-size: 11px; word-break: break-all; }
 </style>

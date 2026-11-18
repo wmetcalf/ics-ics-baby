@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"image"
 	_ "image/png"
 	"net/http"
@@ -683,5 +684,38 @@ func TestCLIVTodoEngineArgv(t *testing.T) {
 	}
 	if sc := readSidecar(t, out); sc["status"] != "skipped" {
 		t.Fatalf("sidecar %v", sc)
+	}
+}
+
+// A body too costly to paint (blurred text shadows) still leaves a PNG of
+// the trusted chrome: the page is re-rendered without its body.
+func TestCLIInviteViewBodyRenderFallback(t *testing.T) {
+	requireChromiumCLI(t)
+	var sh []string
+	for i := 0; i < 100; i++ {
+		sh = append(sh, fmt.Sprintf("0 0 %dpx #%06x", 40+i, (i*2654435761)&0xffffff))
+	}
+	var words []string
+	for i := 0; i < 100; i++ {
+		words = append(words, fmt.Sprintf("lorem%d", i))
+	}
+	body := `<p style="font-size:100px;text-shadow:` + strings.Join(sh, ",") + `">` + strings.Join(words, " ") + `</p>`
+	body = strings.NewReplacer(`\`, `\\`, ";", `\;`, ",", `\,`).Replace(body)
+	dir := t.TempDir()
+	in := filepath.Join(dir, "ts.ics")
+	ics := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:1\r\nDTSTART:20261120T150000Z\r\nSUMMARY:Sync\r\nX-ALT-DESC;FMTTYPE=text/html:" + body + "\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	if err := os.WriteFile(in, []byte(ics), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "o")
+	res := runCLI(t, "--out", out, "--invite-view", "owa", "--chromium-timeout", "3s", in)
+	sc := readSidecar(t, out)
+	dropped, _ := sc["dropped"].([]any)
+	found := false
+	for _, d := range dropped {
+		found = found || d == "body_render_failed"
+	}
+	if res.exit != 0 || sc["status"] != "ok" || !found || !fileExists(filepath.Join(out, "ics-ics-baby-owa.png")) {
+		t.Fatalf("exit %d sidecar %v stderr %s", res.exit, sc, res.stderr)
 	}
 }

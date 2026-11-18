@@ -401,6 +401,19 @@ func main() {
 // writeOWAView writes the OWA HTML, renders its PNG with Chromium and then
 // writes the sidecar, which records the render outcome. It returns whether a
 // requested step failed and the "Wrote ..." lines for files that exist.
+// renderOWAChromeOnly writes the view without its body and renders it,
+// with a short timeout: the chrome alone renders in about a second.
+func renderOWAChromeOnly(cal *icsparse.CalendarInfo, inputSHA, outDir, htmlPath, pngPath string, width int, opts render.ChromiumSettings) error {
+	if err := clientview.WriteOWAChromeOnly(cal, inputSHA, outDir); err != nil {
+		return err
+	}
+	if opts.Timeout <= 0 || opts.Timeout > 15*time.Second {
+		opts.Timeout = 15 * time.Second
+	}
+	_, err := render.RenderHTMLWithChromiumResult(htmlPath, pngPath, width, opts)
+	return err
+}
+
 // owaBuildMaxHeap bounds the Go heap while building the OWA view.
 const owaBuildMaxHeap = 2 << 30
 
@@ -439,11 +452,21 @@ func writeOWAView(cal *icsparse.CalendarInfo, inputSHA, outDir string, width int
 			sc.Dropped = append(sc.Dropped, "capture_truncated")
 		}
 		if err != nil {
-			sc.Status = "render_failed"
-			sc.Error = err.Error()
-			failed = true
-			_ = os.Remove(pngPath)
 			fmt.Fprintf(os.Stderr, "owa chromium render error: %v\n", err)
+			_ = os.Remove(pngPath)
+			// The body (e.g. CSS too costly to paint) must not cost the
+			// trusted chrome its capture: render the page once more with
+			// the body replaced by a note.
+			if ferr := renderOWAChromeOnly(cal, inputSHA, outDir, htmlPath, pngPath, width, opts); ferr == nil {
+				sc.Dropped = append(sc.Dropped, "body_render_failed")
+				fmt.Fprintln(os.Stderr, "owa view: rendered without its body")
+			} else {
+				sc.Status = "render_failed"
+				sc.Error = err.Error()
+				failed = true
+				_ = os.Remove(pngPath)
+				fmt.Fprintf(os.Stderr, "owa chromium render error (without body): %v\n", ferr)
+			}
 		}
 	}
 

@@ -13,6 +13,9 @@ import (
 	"time"
 	"unicode"
 
+	"golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
+
 	"ics-ics-baby/internal/icsparse"
 )
 
@@ -190,7 +193,9 @@ func writeOWAGuarded(cal *icsparse.CalendarInfo, inputSHA256, outDir string, g *
 	// The rendered body is sanitized first, so it has the first claim on
 	// the shared inline-image budget.
 	var body *SanitizeResult
-	if ev != nil {
+	if ev != nil && g != nil && g.chromeOnly {
+		body = &SanitizeResult{HTML: bodyNotRendered}
+	} else if ev != nil {
 		res, err := sanitizeParts(ev, outDir)
 		if err != nil {
 			return failView(sc, outDir, g, fmt.Errorf("sanitize body: %w", err))
@@ -210,6 +215,9 @@ func writeOWAGuarded(cal *icsparse.CalendarInfo, inputSHA256, outDir string, g *
 				break
 			}
 			sc.OtherEvents = append(sc.OtherEvents, cal.Events[i].Summary)
+			if g != nil && g.chromeOnly {
+				continue // the page only lists them; evidence is the first build's
+			}
 			d, err := eventEvidence(&cal.Events[i], outDir)
 			if err != nil {
 				return failView(sc, outDir, g, fmt.Errorf("sanitize event %d body: %w", i+1, err))
@@ -313,7 +321,41 @@ func writeOWAGuarded(cal *icsparse.CalendarInfo, inputSHA256, outDir string, g *
 		view.Attachments = append(view.Attachments, attachmentView{Name: attachmentName(att), Size: sizeText(att.Size)})
 	}
 
+	capChrome(&view)
 	return sc, writeView(outDir, view, g)
+}
+
+// bodyNotRendered stands in for a body whose rendering failed.
+const bodyNotRendered = `<p class="owa-remote-ref">The message body was not rendered: it exceeded the render time limit or failed to render; see the sidecar.</p>`
+
+// WriteOWAChromeOnly rewrites the view page with the body replaced by a
+// note, keeping the trusted chrome (subject, organizer, time, RSVP, Join,
+// attendees, attachments). The CLI renders it when the full page fails to
+// render (e.g. body CSS too costly to paint), so the chrome is still
+// captured. The sidecar it returns is not meant to replace the first one.
+func WriteOWAChromeOnly(cal *icsparse.CalendarInfo, inputSHA256, outDir string) error {
+	_, err := writeOWAGuarded(cal, inputSHA256, outDir, &buildGuard{chromeOnly: true})
+	return err
+}
+
+// maxChromeItems bounds each list of the view's chrome (attendees,
+// attachments, other events): an attacker-sized list must not push the
+// rest of the chrome and the body past the capture height.
+const maxChromeItems = 50
+
+func capChrome(v *owaView) {
+	capList := func(l []string) []string {
+		if len(l) <= maxChromeItems {
+			return l
+		}
+		out := append([]string(nil), l[:maxChromeItems]...)
+		return append(out, fmt.Sprintf("… and %d more", len(l)-maxChromeItems))
+	}
+	v.Required, v.Optional, v.OtherEvents = capList(v.Required), capList(v.Optional), capList(v.OtherEvents)
+	if n := len(v.Attachments); n > maxChromeItems {
+		v.Attachments = append(append([]attachmentView(nil), v.Attachments[:maxChromeItems]...),
+			attachmentView{Name: fmt.Sprintf("… and %d more", n-maxChromeItems)})
+	}
 }
 
 // maxAltDescParts bounds the HTML X-ALT-DESC parts sanitized per event.
@@ -398,35 +440,40 @@ func sanitizeParts(ev *icsparse.EventInfo, outDir string) (*SanitizeResult, erro
 	return merged, nil
 }
 
-// visibleHTML: the sanitized fragment shows text or an image.
+// visibleHTML: the sanitized fragment shows text, an image or one of the
+// sanitizer's own placeholders. It is read with the HTML parser: style text
+// is not content, and attacker attributes cannot pose as placeholders
+// (their classes carry the x_ prefix).
 func visibleHTML(h string) bool {
-	// (style sheets are not content: an attribute selector naming
-	// owa-remote-ref must not count as a placeholder)
-	for {
-		i := strings.Index(h, "<style")
-		if i < 0 {
-			break
-		}
-		j := strings.Index(h[i:], "</style>")
-		if j < 0 {
-			h = h[:i]
-			break
-		}
-		h = h[:i] + h[i+j+len("</style>"):]
+	ctx := &html.Node{Type: html.ElementNode, Data: "div", DataAtom: atom.Div}
+	nodes, err := html.ParseFragment(strings.NewReader(h), ctx)
+	if err != nil {
+		return strings.TrimSpace(h) != ""
 	}
-	if strings.Contains(h, "<img") || strings.Contains(h, "owa-remote-ref") || strings.Contains(h, "<svg") {
-		return true
-	}
-	inTag, inStyle := false, false
-	for i := 0; i < len(h); i++ {
-		switch c := h[i]; {
-		case c == '<':
-			inTag = true
-			inStyle = strings.HasPrefix(h[i:], "<style") || (inStyle && !strings.HasPrefix(h[i:], "</style"))
-		case c == '>':
-			inTag = false
-		case !inTag && !inStyle && c > ' ':
-			return true
+	stack := append([]*html.Node(nil), nodes...)
+	for len(stack) > 0 {
+		n := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		switch n.Type {
+		case html.TextNode:
+			if strings.TrimSpace(n.Data) != "" {
+				return true
+			}
+		case html.ElementNode:
+			switch n.DataAtom {
+			case atom.Style:
+				continue
+			case atom.Img, atom.Svg:
+				return true
+			}
+			for _, a := range n.Attr {
+				if a.Namespace == "" && a.Key == "class" && a.Val == "owa-remote-ref" {
+					return true
+				}
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			stack = append(stack, c)
 		}
 	}
 	return false

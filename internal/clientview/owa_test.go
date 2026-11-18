@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -422,5 +423,33 @@ func TestOWABidiControlsNeutralized(t *testing.T) {
 	}
 	if isWebURL("https://moc.tfosorcim.ai/‮") || isWebURL("https://a‮b.example/") {
 		t.Fatal("URL with a bidi control treated as a live link")
+	}
+}
+
+// The chrome above the body is bounded, so attacker-sized lists cannot push
+// attachments, other events and the emulation label past the capture.
+func TestOWAChromeListsCapped(t *testing.T) {
+	var lines []string
+	for i := 0; i < 1300; i++ {
+		lines = append(lines, "ATTENDEE;CN=Staff "+strconv.Itoa(i)+":mailto:s"+strconv.Itoa(i)+"@example.com")
+	}
+	_, html, _ := writeOWA(t, parseICS(t, invite("REQUEST", lines...)))
+	if n := strings.Count(html, "Staff "); n > maxChromeItems+1 {
+		t.Fatalf("%d attendees rendered", n)
+	}
+	if !strings.Contains(html, "and 1250 more") {
+		t.Fatal("no overflow line")
+	}
+}
+
+func TestVisibleHTMLParsed(t *testing.T) {
+	if !visibleHTML(`<styled></styled><p>URGENT</p>`) {
+		t.Fatal("<styled> hid the rest")
+	}
+	if visibleHTML(`<p class="x_owa-remote-ref"></p>`) || visibleHTML(`<p title="owa-remote-ref"></p>`) {
+		t.Fatal("attacker attribute counted as a placeholder")
+	}
+	if !visibleHTML(`<span class="owa-remote-ref" style="x">remote image: a</span>`) || !visibleHTML(`<img src="data:image/png;base64,AA">`) {
+		t.Fatal("real placeholder/image not visible")
 	}
 }
