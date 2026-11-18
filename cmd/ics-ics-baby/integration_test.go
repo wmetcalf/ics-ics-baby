@@ -719,3 +719,17 @@ func TestCLIInviteViewBodyRenderFallback(t *testing.T) {
 		t.Fatalf("exit %d sidecar %v stderr %s", res.exit, sc, res.stderr)
 	}
 }
+
+// When building the view runs out of budget, the trusted chrome is still
+// captured (its build sanitizes nothing).
+func TestCLIInviteViewBudgetFallback(t *testing.T) {
+	requireChromiumCLI(t)
+	out := filepath.Join(t.TempDir(), "o")
+	res := runCLI(t, "--out", out, "--invite-view", "owa", "--owa-build-timeout", "1ns", fixtureDir+"11-html-alt-desc.ics")
+	sc := readSidecar(t, out)
+	dropped := fmt.Sprint(sc["dropped"])
+	if res.exit != 0 || sc["status"] != "ok" || !strings.Contains(dropped, "build_budget_exceeded") ||
+		!strings.Contains(dropped, "body_render_failed") || !fileExists(filepath.Join(out, "ics-ics-baby-owa.png")) {
+		t.Fatalf("exit %d sidecar %v stderr %s", res.exit, sc, res.stderr)
+	}
+}

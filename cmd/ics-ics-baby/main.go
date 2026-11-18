@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -403,17 +404,17 @@ func main() {
 // requested step failed and the "Wrote ..." lines for files that exist.
 // renderOWAChromeOnly writes the view without its body and renders it,
 // with a short timeout: the chrome alone renders in about a second.
-func renderOWAChromeOnly(cal *icsparse.CalendarInfo, inputSHA, outDir, pngPath string, width int, opts render.ChromiumSettings) error {
-	chromePath, err := clientview.WriteOWAChromeOnly(cal, inputSHA, outDir)
+func renderOWAChromeOnly(cal *icsparse.CalendarInfo, inputSHA, outDir, pngPath string, width int, opts render.ChromiumSettings) (clientview.Sidecar, error) {
+	chromeSC, chromePath, err := clientview.WriteOWAChromeOnly(cal, inputSHA, outDir)
 	defer os.Remove(chromePath) // a render input only; the view HTML keeps the body
 	if err != nil {
-		return err
+		return chromeSC, err
 	}
 	if opts.Timeout <= 0 || opts.Timeout > 15*time.Second {
 		opts.Timeout = 15 * time.Second
 	}
 	_, err = render.RenderHTMLWithChromiumResult(chromePath, pngPath, width, opts)
-	return err
+	return chromeSC, err
 }
 
 // owaBuildMaxHeap bounds the Go heap while building the OWA view.
@@ -439,6 +440,17 @@ func writeOWAView(cal *icsparse.CalendarInfo, inputSHA, outDir string, width int
 		sc.Error = err.Error()
 		failed = true
 		fmt.Fprintf(os.Stderr, "owa view error: %v\n", err)
+		if slices.Contains(sc.Dropped, "build_budget_exceeded") {
+			// Sanitizing the bodies ran out of budget: still capture the
+			// trusted chrome (its build sanitizes nothing).
+			if csc, ferr := renderOWAChromeOnly(cal, inputSHA, outDir, pngPath, width, opts); ferr == nil {
+				csc.Dropped = append([]string{"build_budget_exceeded", "body_render_failed"}, csc.Dropped...)
+				sc, failed = csc, false
+				fmt.Fprintln(os.Stderr, "owa view: rendered without its body")
+			} else {
+				_ = os.Remove(pngPath)
+			}
+		}
 	}
 	if _, statErr := os.Stat(htmlPath); statErr == nil {
 		wrote = append(wrote, "Wrote OWA view: "+htmlPath) // a failure page when err != nil
@@ -459,7 +471,7 @@ func writeOWAView(cal *icsparse.CalendarInfo, inputSHA, outDir string, width int
 			// The body (e.g. CSS too costly to paint) must not cost the
 			// trusted chrome its capture: render the page once more with
 			// the body replaced by a note.
-			if ferr := renderOWAChromeOnly(cal, inputSHA, outDir, pngPath, width, opts); ferr == nil {
+			if _, ferr := renderOWAChromeOnly(cal, inputSHA, outDir, pngPath, width, opts); ferr == nil {
 				sc.Dropped = append(sc.Dropped, "body_render_failed")
 				fmt.Fprintln(os.Stderr, "owa view: rendered without its body")
 			} else {
@@ -480,8 +492,13 @@ func writeOWAView(cal *icsparse.CalendarInfo, inputSHA, outDir string, width int
 			wrote = append(wrote, "Wrote OWA sidecar: "+sidecarPath)
 		}
 	}
-	if htmlOK && sc.Status == "ok" {
+	if sc.Status == "ok" && pathExists(pngPath) {
 		wrote = append(wrote, "Wrote OWA PNG: "+pngPath)
 	}
 	return failed, wrote
+}
+
+func pathExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }

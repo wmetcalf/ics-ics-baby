@@ -485,7 +485,7 @@ func TestWriteOWAChromeOnlySeparateFile(t *testing.T) {
 	if _, err := WriteOWA(cal, "x", dir); err != nil {
 		t.Fatal(err)
 	}
-	p, err := WriteOWAChromeOnly(cal, "x", dir)
+	_, p, err := WriteOWAChromeOnly(cal, "x", dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -493,5 +493,24 @@ func TestWriteOWAChromeOnlySeparateFile(t *testing.T) {
 	chrome, _ := os.ReadFile(p)
 	if !strings.Contains(string(full), "evil.example/login") || strings.Contains(string(chrome), "evil.example/login") || p == filepath.Join(dir, OWAHTMLName) {
 		t.Fatalf("full has body: %v; chrome has body: %v; path %s", strings.Contains(string(full), "evil.example/login"), strings.Contains(string(chrome), "evil.example/login"), p)
+	}
+}
+
+// Round-9: host labels show the ASCII (IDNA) form the browser navigates to;
+// a plain-text body is not clipped like chrome text.
+func TestOWARound9(t *testing.T) {
+	cal := parseICS(t, invite("REQUEST", "LOCATION:https://login.micrоsoftonline.com/common",
+		"X-MICROSOFT-SKYPETEAMSMEETINGURL:https://teams.micrоsoft.com/l/x",
+		"X-ALT-DESC;FMTTYPE=text/html:<a href=\"https://pay.micrоsoft.com/x\">pay</a>"))
+	_, html, _ := writeOWA(t, cal)
+	for _, want := range []string{"(login.xn--micrsoftonline-", `owa-join-host">teams.xn--micrsoft-`, "(pay.xn--micrsoft-"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("missing %s", want)
+		}
+	}
+	d := strings.Repeat("Agenda: roadmap review and staffing for Q1. ", 7) + "ACTION REQUIRED: https://login.example/verify"
+	_, html, _ = writeOWA(t, parseICS(t, invite("REQUEST", "DESCRIPTION:"+d)))
+	if !strings.Contains(html, "login.example/verify") {
+		t.Fatal("plain body clipped")
 	}
 }

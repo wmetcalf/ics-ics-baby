@@ -24,6 +24,7 @@ import (
 	_ "golang.org/x/image/webp"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
+	"golang.org/x/net/idna"
 )
 
 // RemoteRef is a reference from the invite body to a resource that the view
@@ -1200,6 +1201,28 @@ func gifSize(d []byte) (w, h int, ok bool) {
 	return w, h, w > 0 && h > 0
 }
 
+// displayHost is a host as the browser navigates to it: a label showing
+// the Unicode form would paint a homograph (Cyrillic о) as the real name.
+func displayHost(h string) string {
+	ascii := true
+	for i := 0; i < len(h); i++ {
+		if h[i] >= 0x80 {
+			ascii = false
+			break
+		}
+	}
+	if ascii {
+		return h
+	}
+	if a, err := idna.Lookup.ToASCII(h); err == nil {
+		return a
+	}
+	if a, err := idna.Punycode.ToASCII(h); err == nil {
+		return a
+	}
+	return h
+}
+
 // inForeign reports whether n is, or sits inside, an <svg>/<math> element.
 func inForeign(n *html.Node) bool {
 	for p := n; p != nil; p = p.Parent {
@@ -1431,7 +1454,7 @@ func (s *sanitizer) href(n *html.Node, tag string, a *html.Attribute) bool {
 		host = s.classify(v).Host // UNC path
 	}
 	s.addLink(Link{Href: v, Host: host, Text: linkText(n)})
-	label := host
+	label := displayHost(host)
 	if !linkSchemesKept[scheme] || (scheme != "mailto" && host == "") {
 		label = clip(v, maxLabel)
 	}

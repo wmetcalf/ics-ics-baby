@@ -269,7 +269,7 @@ func writeOWAGuarded(cal *icsparse.CalendarInfo, inputSHA256, outDir string, g *
 		if isWebURL(view.Location) {
 			u, _ := url.Parse(view.Location)
 			view.LocationLink = template.URL(view.Location)
-			view.LocationHost = u.Host
+			view.LocationHost = displayHost(u.Host)
 		}
 	}
 
@@ -280,7 +280,7 @@ func writeOWAGuarded(cal *icsparse.CalendarInfo, inputSHA256, outDir string, g *
 	if active {
 		u, _ := url.Parse(raw)
 		view.JoinHref = template.URL(raw)
-		view.JoinHost = u.Host
+		view.JoinHost = displayHost(u.Host)
 	}
 
 	for _, a := range ev.Attendees {
@@ -337,9 +337,11 @@ const OWAChromeHTMLName = "ics-ics-baby-owa-chrome.html"
 // and returns its path. The CLI renders it when the full page fails to
 // render (e.g. body CSS too costly to paint), so the chrome is still
 // captured.
-func WriteOWAChromeOnly(cal *icsparse.CalendarInfo, inputSHA256, outDir string) (string, error) {
-	_, err := writeOWAGuarded(cal, inputSHA256, outDir, &buildGuard{chromeOnly: true, htmlName: OWAChromeHTMLName})
-	return filepath.Join(outDir, OWAChromeHTMLName), err
+// The sidecar it returns carries the chrome fields (event UID, join URL,
+// other events) but no body evidence.
+func WriteOWAChromeOnly(cal *icsparse.CalendarInfo, inputSHA256, outDir string) (Sidecar, string, error) {
+	sc, err := writeOWAGuarded(cal, inputSHA256, outDir, &buildGuard{chromeOnly: true, htmlName: OWAChromeHTMLName})
+	return sc, filepath.Join(outDir, OWAChromeHTMLName), err
 }
 
 // maxChromeItems bounds each list of the view's chrome (attendees,
@@ -557,7 +559,7 @@ func neutralizeBidi(v *owaView) {
 	v.Reason, v.Subject, v.Initials = c(v.Reason), c(v.Subject), c(v.Initials)
 	v.OrganizerName, v.OrganizerAddr, v.When, v.Recurrence = c(v.OrganizerName), c(v.OrganizerAddr), c(v.When), c(v.Recurrence)
 	v.Location, v.LocationHost, v.JoinRaw, v.JoinHost = c(v.Location), c(v.LocationHost), c(v.JoinRaw), c(v.JoinHost)
-	v.BodyText = c(v.BodyText)
+	v.BodyText = bidiControls.Replace(v.BodyText) // the body: not clipped like chrome text
 	for i := range v.Required {
 		v.Required[i] = c(v.Required[i])
 	}
