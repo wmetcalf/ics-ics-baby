@@ -15,7 +15,8 @@ import (
 type buildGuard struct {
 	mu         sync.Mutex
 	abandoned  bool
-	chromeOnly bool // WriteOWAChromeOnly: no body
+	chromeOnly bool   // WriteOWAChromeOnly: no body
+	htmlName   string // page file name (default OWAHTMLName)
 }
 
 // WriteOWABudgeted is WriteOWA bounded in time and Go heap. The sanitizer

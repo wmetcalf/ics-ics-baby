@@ -403,14 +403,16 @@ func main() {
 // requested step failed and the "Wrote ..." lines for files that exist.
 // renderOWAChromeOnly writes the view without its body and renders it,
 // with a short timeout: the chrome alone renders in about a second.
-func renderOWAChromeOnly(cal *icsparse.CalendarInfo, inputSHA, outDir, htmlPath, pngPath string, width int, opts render.ChromiumSettings) error {
-	if err := clientview.WriteOWAChromeOnly(cal, inputSHA, outDir); err != nil {
+func renderOWAChromeOnly(cal *icsparse.CalendarInfo, inputSHA, outDir, pngPath string, width int, opts render.ChromiumSettings) error {
+	chromePath, err := clientview.WriteOWAChromeOnly(cal, inputSHA, outDir)
+	defer os.Remove(chromePath) // a render input only; the view HTML keeps the body
+	if err != nil {
 		return err
 	}
 	if opts.Timeout <= 0 || opts.Timeout > 15*time.Second {
 		opts.Timeout = 15 * time.Second
 	}
-	_, err := render.RenderHTMLWithChromiumResult(htmlPath, pngPath, width, opts)
+	_, err = render.RenderHTMLWithChromiumResult(chromePath, pngPath, width, opts)
 	return err
 }
 
@@ -457,7 +459,7 @@ func writeOWAView(cal *icsparse.CalendarInfo, inputSHA, outDir string, width int
 			// The body (e.g. CSS too costly to paint) must not cost the
 			// trusted chrome its capture: render the page once more with
 			// the body replaced by a note.
-			if ferr := renderOWAChromeOnly(cal, inputSHA, outDir, htmlPath, pngPath, width, opts); ferr == nil {
+			if ferr := renderOWAChromeOnly(cal, inputSHA, outDir, pngPath, width, opts); ferr == nil {
 				sc.Dropped = append(sc.Dropped, "body_render_failed")
 				fmt.Fprintln(os.Stderr, "owa view: rendered without its body")
 			} else {

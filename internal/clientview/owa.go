@@ -246,10 +246,10 @@ func writeOWAGuarded(cal *icsparse.CalendarInfo, inputSHA256, outDir string, g *
 	}
 
 	view.OrganizerAddr = organizerAddress(ev.Organizer)
+	// Only the CN of the ORGANIZER line whose address is shown (the
+	// signals merge the parameters of every ORGANIZER line).
 	if ev.OrganizerCN != nil {
 		view.OrganizerName = strings.TrimSpace(*ev.OrganizerCN)
-	} else if ev.AutoprocessingSignals != nil && ev.AutoprocessingSignals.OrganizerDetails != nil && ev.AutoprocessingSignals.OrganizerDetails.CN != nil {
-		view.OrganizerName = strings.TrimSpace(*ev.AutoprocessingSignals.OrganizerDetails.CN)
 	}
 	if view.OrganizerName == "" {
 		view.OrganizerName = view.OrganizerAddr
@@ -326,16 +326,20 @@ func writeOWAGuarded(cal *icsparse.CalendarInfo, inputSHA256, outDir string, g *
 }
 
 // bodyNotRendered stands in for a body whose rendering failed.
-const bodyNotRendered = `<p class="owa-remote-ref">The message body was not rendered: it exceeded the render time limit or failed to render; see the sidecar.</p>`
+const bodyNotRendered = `<p class="owa-remote-ref">This capture leaves the message body out: the full page did not render. The body is in the HTML view and the sidecar.</p>`
 
-// WriteOWAChromeOnly rewrites the view page with the body replaced by a
-// note, keeping the trusted chrome (subject, organizer, time, RSVP, Join,
-// attendees, attachments). The CLI renders it when the full page fails to
+// OWAChromeHTMLName is the page WriteOWAChromeOnly writes.
+const OWAChromeHTMLName = "ics-ics-baby-owa-chrome.html"
+
+// WriteOWAChromeOnly writes the view page with the body replaced by a note,
+// keeping the trusted chrome (subject, organizer, time, RSVP, Join,
+// attendees, attachments), to its own file (the view HTML keeps the body)
+// and returns its path. The CLI renders it when the full page fails to
 // render (e.g. body CSS too costly to paint), so the chrome is still
-// captured. The sidecar it returns is not meant to replace the first one.
-func WriteOWAChromeOnly(cal *icsparse.CalendarInfo, inputSHA256, outDir string) error {
-	_, err := writeOWAGuarded(cal, inputSHA256, outDir, &buildGuard{chromeOnly: true})
-	return err
+// captured.
+func WriteOWAChromeOnly(cal *icsparse.CalendarInfo, inputSHA256, outDir string) (string, error) {
+	_, err := writeOWAGuarded(cal, inputSHA256, outDir, &buildGuard{chromeOnly: true, htmlName: OWAChromeHTMLName})
+	return filepath.Join(outDir, OWAChromeHTMLName), err
 }
 
 // maxChromeItems bounds each list of the view's chrome (attendees,
@@ -535,9 +539,21 @@ var bidiControls = strings.NewReplacer(
 	"\u200e", "\ufffd", "\u200f", "\ufffd", "\u061c", "\ufffd",
 )
 
+// maxChromeText bounds each attacker string in the chrome: the page shows a
+// few lines at most, and Chromium shapes and lays out every byte (650 KB of
+// mixed-direction SUMMARY took longer than the render timeout).
+const maxChromeText = 300
+
+func clipChrome(s string) string {
+	if len(s) <= maxChromeText {
+		return s
+	}
+	return truncateUTF8(s, maxChromeText) + "…"
+}
+
 // neutralizeBidi cleans every attacker-supplied string of the view chrome.
 func neutralizeBidi(v *owaView) {
-	c := bidiControls.Replace
+	c := func(s string) string { return bidiControls.Replace(clipChrome(s)) }
 	v.Reason, v.Subject, v.Initials = c(v.Reason), c(v.Subject), c(v.Initials)
 	v.OrganizerName, v.OrganizerAddr, v.When, v.Recurrence = c(v.OrganizerName), c(v.OrganizerAddr), c(v.When), c(v.Recurrence)
 	v.Location, v.LocationHost, v.JoinRaw, v.JoinHost = c(v.Location), c(v.LocationHost), c(v.JoinRaw), c(v.JoinHost)
@@ -559,6 +575,10 @@ func neutralizeBidi(v *owaView) {
 }
 
 func writeView(outDir string, view owaView, g *buildGuard) error {
+	name := OWAHTMLName
+	if g != nil && g.htmlName != "" {
+		name = g.htmlName
+	}
 	neutralizeBidi(&view)
 	// Under g.mu only the final file write: WriteOWABudgeted must be able
 	// to abandon the build while the template executes.
@@ -585,7 +605,7 @@ func writeView(outDir string, view owaView, g *buildGuard) error {
 			if werr := os.MkdirAll(outDir, 0o755); werr != nil {
 				return werr
 			}
-			return os.WriteFile(filepath.Join(outDir, OWAHTMLName), buf.Bytes(), 0o644)
+			return os.WriteFile(filepath.Join(outDir, name), buf.Bytes(), 0o644)
 		})
 		return fmt.Errorf("render owa template: %w", err)
 	}
@@ -593,7 +613,7 @@ func writeView(outDir string, view owaView, g *buildGuard) error {
 		if err := os.MkdirAll(outDir, 0o755); err != nil {
 			return err
 		}
-		return os.WriteFile(filepath.Join(outDir, OWAHTMLName), buf.Bytes(), 0o644)
+		return os.WriteFile(filepath.Join(outDir, name), buf.Bytes(), 0o644)
 	})
 }
 
@@ -612,7 +632,12 @@ func attendeeLabel(a icsparse.Attendee) string {
 	addr := organizerAddress(&a.Mailto)
 	if a.CN != nil && strings.TrimSpace(*a.CN) != "" {
 		if addr != "" {
-			return strings.TrimSpace(*a.CN) + " <" + addr + ">"
+			// A long CN must not push the address out of the clipped line.
+			cn := strings.TrimSpace(*a.CN)
+			if len(cn) > 80 {
+				cn = truncateUTF8(cn, 80) + "…"
+			}
+			return cn + " <" + addr + ">"
 		}
 		return strings.TrimSpace(*a.CN)
 	}

@@ -453,3 +453,45 @@ func TestVisibleHTMLParsed(t *testing.T) {
 		t.Fatal("real placeholder/image not visible")
 	}
 }
+
+// Round-8: the location host label comes before the attacker-sized URL text
+// (a long URL pushed it under the clip), chrome strings are bounded, and the
+// organizer's name never comes from another ORGANIZER line via the signals.
+func TestOWARound8Chrome(t *testing.T) {
+	u := "https://login.microsoftonline.com" + strings.Repeat("%2Fcommon%2Foauth2%2Fv2.0%2Fauthorize%3Fclient_id%3D4765445b", 12) + "@evil.example/x"
+	cal := parseICS(t, invite("REQUEST", "LOCATION:"+u, "SUMMARY:"+strings.Repeat("aא", 200000)))
+	_, html, _ := writeOWA(t, cal)
+	host := strings.Index(html, `class="owa-host">(evil.example)`)
+	link := strings.Index(html, `class="owa-loc-link"`)
+	if host < 0 || link < 0 || host > link {
+		t.Fatalf("host label at %d, link at %d", host, link)
+	}
+	if len(html) > 64<<10 {
+		t.Fatalf("chrome not bounded: %d bytes of HTML", len(html))
+	}
+
+	ics := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:o1\r\nSUMMARY:Payroll\r\nLOCATION:https://evil.example/room\r\n" +
+		"ORGANIZER;CN=Microsoft Security:mailto:security@microsoft.com\r\nORGANIZER:mailto:attacker@evil.example\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	_, html, _ = writeOWA(t, parseICS(t, ics))
+	if strings.Contains(html, "Microsoft Security") {
+		t.Fatal("CN of one ORGANIZER paired with another's address")
+	}
+}
+
+// The chrome-only page goes to its own file; the view HTML keeps the body.
+func TestWriteOWAChromeOnlySeparateFile(t *testing.T) {
+	cal := parseICS(t, invite("REQUEST", `X-ALT-DESC;FMTTYPE=text/html:<p>Click <a href="https://evil.example/login">here</a></p>`))
+	dir := t.TempDir()
+	if _, err := WriteOWA(cal, "x", dir); err != nil {
+		t.Fatal(err)
+	}
+	p, err := WriteOWAChromeOnly(cal, "x", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	full, _ := os.ReadFile(filepath.Join(dir, OWAHTMLName))
+	chrome, _ := os.ReadFile(p)
+	if !strings.Contains(string(full), "evil.example/login") || strings.Contains(string(chrome), "evil.example/login") || p == filepath.Join(dir, OWAHTMLName) {
+		t.Fatalf("full has body: %v; chrome has body: %v; path %s", strings.Contains(string(full), "evil.example/login"), strings.Contains(string(chrome), "evil.example/login"), p)
+	}
+}

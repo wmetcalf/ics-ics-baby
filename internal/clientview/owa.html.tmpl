@@ -70,7 +70,7 @@
     <div class="owa-meta-text">{{if .When}}{{.When}}{{else}}<span class="owa-muted">No time given</span>{{end}}{{if .Recurrence}}<div class="owa-muted">{{.Recurrence}}</div>{{end}}</div>
     {{- if .Location}}
     <div class="owa-ico">&#128205;</div>
-    <div class="owa-meta-text">{{if .LocationLink}}<a class="owa-loc-link" href="{{.LocationLink}}">{{.Location}}</a><span class="owa-host">({{.LocationHost}})</span>{{else}}{{.Location}}{{end}}</div>
+    <div class="owa-meta-text">{{if .LocationLink}}<span class="owa-host">({{.LocationHost}})</span> <a class="owa-loc-link" href="{{.LocationLink}}">{{.Location}}</a>{{else}}{{.Location}}{{end}}</div>
     {{- end}}
   </div>
   {{- if not .Canceled}}
