@@ -37,6 +37,7 @@ type ChromiumSettings struct {
 }
 
 const (
+	maxTrackedRequests       = 10000
 	defaultChromiumTimeout   = 45 * time.Second
 	defaultChromiumMaxHeight = 20000
 )
@@ -67,19 +68,40 @@ func FindChromium(bin string) (string, error) {
 // the HTML file itself (and data: URLs) is failed, and DNS/proxy are dead.
 // It returns the URLs it blocked. Blocked requests are not an error.
 func RenderHTMLWithChromium(htmlPath, pngPath string, width int, opts ChromiumSettings) (blocked []string, err error) {
+	res, err := RenderHTMLWithChromiumResult(htmlPath, pngPath, width, opts)
+	return res.Blocked, err
+}
+
+// ChromiumResult is what a Chromium render reports besides errors.
+type ChromiumResult struct {
+	// Blocked are the URLs the render blocked (sorted, de-duplicated).
+	Blocked []string
+	// Truncated is true when the page was taller than MaxHeight and the
+	// capture was cut there.
+	Truncated bool
+}
+
+// RenderHTMLWithChromiumResult is RenderHTMLWithChromium returning a
+// ChromiumResult. Blocked URLs are returned on error too.
+func RenderHTMLWithChromiumResult(htmlPath, pngPath string, width int, opts ChromiumSettings) (ChromiumResult, error) {
+	blocked, truncated, err := renderChromium(htmlPath, pngPath, width, opts)
+	return ChromiumResult{Blocked: blocked, Truncated: truncated}, err
+}
+
+func renderChromium(htmlPath, pngPath string, width int, opts ChromiumSettings) (blocked []string, truncated bool, err error) {
 	if htmlPath == "" || pngPath == "" {
-		return nil, errors.New("html and png paths must be provided")
+		return nil, false, errors.New("html and png paths must be provided")
 	}
 	absHTML, err := filepath.Abs(htmlPath)
 	if err != nil {
-		return nil, fmt.Errorf("resolve html path: %w", err)
+		return nil, false, fmt.Errorf("resolve html path: %w", err)
 	}
 	if _, err := os.Stat(absHTML); err != nil {
-		return nil, fmt.Errorf("html input not found: %w", err)
+		return nil, false, fmt.Errorf("html input not found: %w", err)
 	}
 	bin, err := FindChromium(opts.Bin)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if width <= 0 {
 		width = 1200
@@ -93,12 +115,12 @@ func RenderHTMLWithChromium(htmlPath, pngPath string, width int, opts ChromiumSe
 		maxHeight = defaultChromiumMaxHeight
 	}
 	if err := os.MkdirAll(filepath.Dir(pngPath), 0o755); err != nil {
-		return nil, fmt.Errorf("create screenshot dir: %w", err)
+		return nil, false, fmt.Errorf("create screenshot dir: %w", err)
 	}
 
 	profileDir, err := os.MkdirTemp("", "ics-ics-baby-chromium-")
 	if err != nil {
-		return nil, fmt.Errorf("create chromium profile dir: %w", err)
+		return nil, false, fmt.Errorf("create chromium profile dir: %w", err)
 	}
 	defer os.RemoveAll(profileDir)
 
@@ -124,6 +146,11 @@ func RenderHTMLWithChromium(htmlPath, pngPath string, width int, opts ChromiumSe
 	var mu sync.Mutex
 	var blockedURLs []string
 	var handlerDone chan struct{}
+	// Requests the page's own CSP (or another renderer policy) refuses never
+	// reach Fetch interception; the Network domain still reports them.
+	requestURLs := map[network.RequestID]string{}
+	var policyBlocked []network.RequestID
+	var netDone chan struct{}
 	// collect stops the browser (so no handler is mid-append) and returns the
 	// blocked URLs gathered so far. Used on success and on every error path.
 	collect := func() []string {
@@ -132,12 +159,20 @@ func RenderHTMLWithChromium(htmlPath, pngPath string, width int, opts ChromiumSe
 		if handlerDone != nil {
 			<-handlerDone
 		}
+		if netDone != nil {
+			<-netDone
+		}
 		mu.Lock()
 		defer mu.Unlock()
+		for _, id := range policyBlocked {
+			if u, ok := requestURLs[id]; ok && !allowedRequest(u, absHTML) {
+				blockedURLs = append(blockedURLs, u)
+			}
+		}
 		return dedupSorted(blockedURLs)
 	}
-	fail := func(step string, err error) ([]string, error) {
-		return collect(), chromiumErr(tctx, timeout, step, err)
+	fail := func(step string, err error) ([]string, bool, error) {
+		return collect(), false, chromiumErr(tctx, timeout, step, err)
 	}
 
 	// Start the browser and target, then turn JS off and interception on
@@ -166,6 +201,45 @@ func RenderHTMLWithChromium(htmlPath, pngPath string, width int, opts ChromiumSe
 	if _, err := chromedp.Call(ctx, fetch.Enable, fetch.EnableParams{Patterns: []*fetch.RequestPattern{{URLPattern: "*"}}}); err != nil {
 		return fail("enable request interception", err)
 	}
+	sent := chromedp.Events(ctx, network.RequestWillBeSent)
+	failed := chromedp.Events(ctx, network.LoadingFailed)
+	sentDone := make(chan struct{})
+	go func() {
+		defer close(sentDone)
+		for ev, err := range sent {
+			if err != nil {
+				return
+			}
+			// data: URLs are allowed and can be megabytes; never kept.
+			if ev.Request != nil && !strings.HasPrefix(strings.ToLower(ev.Request.URL), "data:") {
+				mu.Lock()
+				if len(requestURLs) < maxTrackedRequests {
+					requestURLs[ev.RequestID] = ev.Request.URL
+				}
+				mu.Unlock()
+			}
+		}
+	}()
+	netDone = make(chan struct{})
+	go func() {
+		defer close(netDone)
+		defer func() { <-sentDone }()
+		for ev, err := range failed {
+			if err != nil {
+				return
+			}
+			if ev.BlockedReason != "" {
+				mu.Lock()
+				if len(policyBlocked) < maxTrackedRequests {
+					policyBlocked = append(policyBlocked, ev.RequestID)
+				}
+				mu.Unlock()
+			}
+		}
+	}()
+	if _, err := chromedp.Call(ctx, network.Enable, network.EnableParams{}); err != nil {
+		return fail("enable network events", err)
+	}
 	if _, err := chromedp.Call(ctx, emulation.SetDeviceMetricsOverride, emulation.SetDeviceMetricsOverrideParams{
 		Width: int64(width), Height: 800, DeviceScaleFactor: 1,
 	}); err != nil {
@@ -191,6 +265,7 @@ func RenderHTMLWithChromium(htmlPath, pngPath string, width int, opts ChromiumSe
 	}
 	if height > float64(maxHeight) {
 		height = float64(maxHeight)
+		truncated = true
 	}
 	beyond := true
 	shot, err := chromedp.Call(ctx, page.CaptureScreenshot, page.CaptureScreenshotParams{
@@ -205,12 +280,12 @@ func RenderHTMLWithChromium(htmlPath, pngPath string, width int, opts ChromiumSe
 	blocked = collect()
 
 	if err := os.WriteFile(pngPath, shot.Data, 0o644); err != nil {
-		return blocked, fmt.Errorf("write png: %w", err)
+		return blocked, truncated, fmt.Errorf("write png: %w", err)
 	}
 	if err := compressPNG(pngPath); err != nil {
-		return blocked, fmt.Errorf("compress png: %w", err)
+		return blocked, truncated, fmt.Errorf("compress png: %w", err)
 	}
-	return blocked, nil
+	return blocked, truncated, nil
 }
 
 type chromiumFlag struct {

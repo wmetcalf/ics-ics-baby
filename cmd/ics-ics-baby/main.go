@@ -424,9 +424,13 @@ func writeOWAView(cal *icsparse.CalendarInfo, inputSHA, outDir string, width int
 	}
 
 	if htmlOK && sc.Status == "ok" {
-		blocked, err := render.RenderHTMLWithChromium(htmlPath, pngPath, width, opts)
-		if blocked != nil {
-			sc.BlockedRequests = blocked
+		res, err := render.RenderHTMLWithChromiumResult(htmlPath, pngPath, width, opts)
+		if res.Blocked != nil {
+			sc.BlockedRequests = res.Blocked
+		}
+		if res.Truncated {
+			// The PNG stops at --chromium-max-height; the page went on.
+			sc.Dropped = append(sc.Dropped, "capture_truncated")
 		}
 		if err != nil {
 			sc.Status = "render_failed"

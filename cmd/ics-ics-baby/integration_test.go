@@ -634,3 +634,29 @@ func TestCLIFindingsJSONWriteFailure(t *testing.T) {
 		t.Fatalf("stdout claims findings were written: %s", res.stdout)
 	}
 }
+
+// A view taller than --chromium-max-height is cut; the sidecar says so.
+func TestCLIInviteViewCaptureTruncated(t *testing.T) {
+	requireChromiumCLI(t)
+	dir := t.TempDir()
+	in := filepath.Join(dir, "tall.ics")
+	ics := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:t@test\r\nSUMMARY:Tall\r\n" +
+		`X-ALT-DESC;FMTTYPE=text/html:<p>See below</p><div style="height:6000px"></div><p>PAY NOW</p>` + "\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	if err := os.WriteFile(in, []byte(ics), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "o")
+	res := runCLI(t, "--out", out, "--invite-view", "owa", "--chromium-max-height", "2000", in)
+	if res.exit != 0 {
+		t.Fatalf("exit %d: %s", res.exit, res.stderr)
+	}
+	sc := readSidecar(t, out)
+	dropped, _ := sc["dropped"].([]any)
+	found := false
+	for _, d := range dropped {
+		found = found || d == "capture_truncated"
+	}
+	if !found {
+		t.Fatalf("sidecar dropped = %v, want capture_truncated", sc["dropped"])
+	}
+}

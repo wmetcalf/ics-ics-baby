@@ -139,8 +139,12 @@ func TestChromiumMaxHeight(t *testing.T) {
 	pngPath := filepath.Join(dir, "out.png")
 	timeout := 30 * time.Second
 	start := time.Now()
-	if _, err := RenderHTMLWithChromium(htmlPath, pngPath, 600, ChromiumSettings{MaxHeight: 3000, Timeout: timeout}); err != nil {
+	res, err := RenderHTMLWithChromiumResult(htmlPath, pngPath, 600, ChromiumSettings{MaxHeight: 3000, Timeout: timeout})
+	if err != nil {
 		t.Fatalf("render: %v", err)
+	}
+	if !res.Truncated {
+		t.Fatal("capture cut at MaxHeight not reported as truncated")
 	}
 	if el := time.Since(start); el >= timeout {
 		t.Fatalf("render took %v, not under timeout %v", el, timeout)
@@ -217,5 +221,36 @@ func TestFileURLDriveLetter(t *testing.T) {
 		if got := fileURLSlashPath(u); got != want {
 			t.Fatalf("fileURLSlashPath(%q) = %q, want %q", raw, got, want)
 		}
+	}
+}
+
+func TestChromiumShortPageNotTruncated(t *testing.T) {
+	requireChromium(t)
+	dir, htmlPath := writeHTML(t, `<p>short</p>`)
+	res, err := RenderHTMLWithChromiumResult(htmlPath, filepath.Join(dir, "out.png"), 600, ChromiumSettings{MaxHeight: 3000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Truncated {
+		t.Fatal("short page reported truncated")
+	}
+}
+
+// A CSP-blocked subresource never reaches request interception; it must
+// still be reported as blocked (the evidence channel for sanitizer misses).
+func TestChromiumCSPBlockedReported(t *testing.T) {
+	requireChromium(t)
+	dir := t.TempDir()
+	htmlPath := filepath.Join(dir, "page.html")
+	doc := `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:"></head><body><img src="http://leak.example/p.gif"></body></html>`
+	if err := os.WriteFile(htmlPath, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	blocked, err := RenderHTMLWithChromium(htmlPath, filepath.Join(dir, "out.png"), 800, ChromiumSettings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsSuffix(blocked, "leak.example/p.gif") {
+		t.Fatalf("blocked = %v, want the CSP-blocked image", blocked)
 	}
 }
