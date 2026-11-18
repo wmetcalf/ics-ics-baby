@@ -1034,3 +1034,24 @@ func TestImageSetDeclarationRecorded(t *testing.T) {
 		t.Fatalf("refs %+v html %s", res.RemoteRefs, res.HTML)
 	}
 }
+
+func TestDroppedBounded(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("<p")
+	for i := 0; i < 1000; i++ {
+		b.WriteString(" on" + strconv.Itoa(i) + "=1")
+	}
+	b.WriteString(" on" + strings.Repeat("Z", 5000) + "=1>x</p>")
+	res, err := OWASanitize(b.String(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Dropped) > maxDropped+1 || !contains(res.Dropped, "dropped_capped") {
+		t.Fatalf("%d dropped codes", len(res.Dropped))
+	}
+	for _, d := range res.Dropped {
+		if len(d) > maxDropLength+4 {
+			t.Fatalf("code of %d bytes", len(d))
+		}
+	}
+}

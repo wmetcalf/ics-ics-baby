@@ -274,7 +274,7 @@ It is off by default and works fully offline. The view shows:
 - required and optional attendees, and an inert attachment list
 - the body: the **raw** `X-ALT-DESC` when its `FMTTYPE` is HTML, sanitized OWA-style; otherwise the description as preformatted text
 
-Remote images, CSS `url()`, relative, `file:` and `cid:` references are replaced by visible placeholders such as "remote image: host", and are never fetched. Scripts, frames, forms, event handlers and `javascript:` URLs are removed.
+Remote, relative, `file:` and `cid:` image references are replaced by visible placeholders such as "remote image: host" (CSS `url()` and other resource references are neutralized without a placeholder); none is fetched, and all are listed in the sidecar's `remote_refs`. Scripts, frames, forms, event handlers and `javascript:` URLs are removed.
 
 | METHOD | View |
 |--------|------|

@@ -404,16 +404,24 @@ func main() {
 // requested step failed and the "Wrote ..." lines for files that exist.
 // renderOWAChromeOnly writes the view without its body and renders it,
 // with a short timeout: the chrome alone renders in about a second.
-func renderOWAChromeOnly(cal *icsparse.CalendarInfo, inputSHA, outDir, pngPath string, width int, opts render.ChromiumSettings) (clientview.Sidecar, error) {
+// A skipped view is not rendered (there is no PNG for one): its page
+// replaces htmlPath instead. A capture cut at the height cap is recorded.
+func renderOWAChromeOnly(cal *icsparse.CalendarInfo, inputSHA, outDir, htmlPath, pngPath string, width int, opts render.ChromiumSettings) (clientview.Sidecar, error) {
 	chromeSC, chromePath, err := clientview.WriteOWAChromeOnly(cal, inputSHA, outDir)
 	defer os.Remove(chromePath) // a render input only; the view HTML keeps the body
 	if err != nil {
 		return chromeSC, err
 	}
+	if chromeSC.Status == "skipped" {
+		return chromeSC, os.Rename(chromePath, htmlPath)
+	}
 	if opts.Timeout <= 0 || opts.Timeout > 15*time.Second {
 		opts.Timeout = 15 * time.Second
 	}
-	_, err = render.RenderHTMLWithChromiumResult(chromePath, pngPath, width, opts)
+	res, err := render.RenderHTMLWithChromiumResult(chromePath, pngPath, width, opts)
+	if err == nil && res.Truncated {
+		chromeSC.Dropped = append(chromeSC.Dropped, "capture_truncated")
+	}
 	return chromeSC, err
 }
 
@@ -443,10 +451,17 @@ func writeOWAView(cal *icsparse.CalendarInfo, inputSHA, outDir string, width int
 		if slices.Contains(sc.Dropped, "build_budget_exceeded") {
 			// Sanitizing the bodies ran out of budget: still capture the
 			// trusted chrome (its build sanitizes nothing).
-			if csc, ferr := renderOWAChromeOnly(cal, inputSHA, outDir, pngPath, width, opts); ferr == nil {
-				csc.Dropped = append([]string{"build_budget_exceeded", "body_render_failed"}, csc.Dropped...)
+			if csc, ferr := renderOWAChromeOnly(cal, inputSHA, outDir, htmlPath, pngPath, width, opts); ferr == nil {
+				if csc.Status == "skipped" {
+					csc.Dropped = append([]string{"build_budget_exceeded"}, csc.Dropped...)
+				} else {
+					csc.Dropped = append([]string{"build_budget_exceeded", "body_render_failed"}, csc.Dropped...)
+					fmt.Fprintln(os.Stderr, "owa view: rendered without its body")
+				}
 				sc, failed = csc, false
-				fmt.Fprintln(os.Stderr, "owa view: rendered without its body")
+				// The abandoned build's inline images are not in this
+				// sidecar (best effort: that goroutine may still be writing).
+				_ = os.RemoveAll(filepath.Join(outDir, clientview.InlineDirName))
 			} else {
 				_ = os.Remove(pngPath)
 			}
@@ -471,8 +486,11 @@ func writeOWAView(cal *icsparse.CalendarInfo, inputSHA, outDir string, width int
 			// The body (e.g. CSS too costly to paint) must not cost the
 			// trusted chrome its capture: render the page once more with
 			// the body replaced by a note.
-			if _, ferr := renderOWAChromeOnly(cal, inputSHA, outDir, pngPath, width, opts); ferr == nil {
+			if csc, ferr := renderOWAChromeOnly(cal, inputSHA, outDir, htmlPath, pngPath, width, opts); ferr == nil {
 				sc.Dropped = append(sc.Dropped, "body_render_failed")
+				if slices.Contains(csc.Dropped, "capture_truncated") && !slices.Contains(sc.Dropped, "capture_truncated") {
+					sc.Dropped = append(sc.Dropped, "capture_truncated")
+				}
 				fmt.Fprintln(os.Stderr, "owa view: rendered without its body")
 			} else {
 				sc.Status = "render_failed"

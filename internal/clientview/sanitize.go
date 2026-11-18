@@ -273,11 +273,29 @@ func newSanitizer(inlineDir string) *sanitizer {
 	return s
 }
 
+// Drop codes can carry attacker names (attribute, at-rule): the list is
+// capped and each code clipped, so the sidecar stays bounded.
+const (
+	maxDropped    = 200
+	maxDropLength = 64
+)
+
 func (s *sanitizer) drop(what string) {
-	if !s.droppedSeen[what] {
-		s.droppedSeen[what] = true
-		s.dropped = append(s.dropped, what)
+	if len(what) > maxDropLength {
+		what = truncateUTF8(what, maxDropLength) + "…"
 	}
+	if s.droppedSeen[what] {
+		return
+	}
+	if len(s.dropped) >= maxDropped {
+		if !s.droppedSeen["dropped_capped"] {
+			s.droppedSeen["dropped_capped"] = true
+			s.dropped = append(s.dropped, "dropped_capped")
+		}
+		return
+	}
+	s.droppedSeen[what] = true
+	s.dropped = append(s.dropped, what)
 }
 
 // maxEvidenceValue clips a recorded URL: the sidecar keeps the evidence,

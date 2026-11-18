@@ -733,3 +733,17 @@ func TestCLIInviteViewBudgetFallback(t *testing.T) {
 		t.Fatalf("exit %d sidecar %v stderr %s", res.exit, sc, res.stderr)
 	}
 }
+
+// A skipped view stays skipped (no PNG) when the build budget runs out.
+func TestCLIInviteViewBudgetSkipped(t *testing.T) {
+	requireChromiumCLI(t)
+	out := filepath.Join(t.TempDir(), "o")
+	res := runCLI(t, "--out", out, "--invite-view", "owa", "--owa-build-timeout", "1ns", fixtureDir+"20-reply-spoof.ics")
+	sc := readSidecar(t, out)
+	if res.exit != 0 || sc["status"] != "skipped" || fileExists(filepath.Join(out, "ics-ics-baby-owa.png")) {
+		t.Fatalf("exit %d sidecar %v png %v", res.exit, sc, fileExists(filepath.Join(out, "ics-ics-baby-owa.png")))
+	}
+	if b, _ := os.ReadFile(filepath.Join(out, "ics-ics-baby-owa.html")); !strings.Contains(string(b), "No meeting view") {
+		t.Fatal("skipped page not written")
+	}
+}
