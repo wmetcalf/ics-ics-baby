@@ -83,6 +83,11 @@ type EventInfo struct {
 	Duration              *string                `json:"duration,omitempty"`
 	RawProps              map[string][]string    `json:"raw_props"`
 	AutoprocessingSignals *AutoprocessingSignals `json:"autoprocessing_signals,omitempty"`
+	// AltDescRaw is the first X-ALT-DESC value, ICS-TEXT-unescaped but not
+	// sanitized. Never serialized; consumers must sanitize before display.
+	AltDescRaw *string `json:"-"`
+	// AltDescFmtType is that X-ALT-DESC's FMTTYPE parameter, lower-cased.
+	AltDescFmtType *string `json:"-"`
 }
 
 type CalendarInfo struct {
@@ -803,6 +808,12 @@ func ParseICSFile(path string, defaultTZ string, maxBytes int64) (*CalendarInfo,
 			case "X-ALT-DESC":
 				descEvent.absorbAltDescription(value, params)
 				ev.RawProps = addRawProp(ev.RawProps, up, value)
+				if ev.AltDescRaw == nil {
+					ev.AltDescRaw = ptr(unescapeICSTextExact(value))
+					if ft, ok := params["FMTTYPE"]; ok {
+						ev.AltDescFmtType = ptr(strings.ToLower(strings.TrimSpace(ft)))
+					}
+				}
 			case "DTSTART":
 				if t, ok := parseICSTime(value, params, locDefault); ok {
 					ev.DTStart = &t
@@ -1746,6 +1757,37 @@ func unescapeICSText(s string) string {
 	s = strings.ReplaceAll(s, "\\;", ";")
 	s = strings.ReplaceAll(s, "\\\\", "\\")
 	return s
+}
+
+// unescapeICSTextExact decodes RFC 5545 TEXT escapes in a single left-to-right
+// pass, so an escaped backslash followed by "n" stays a literal backslash + n.
+// (unescapeICSText is left as-is: changing it would alter default outputs.)
+func unescapeICSTextExact(s string) string {
+	if !strings.Contains(s, "\\") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c != '\\' || i+1 >= len(s) {
+			b.WriteByte(c)
+			continue
+		}
+		i++
+		switch s[i] {
+		case 'n', 'N':
+			b.WriteByte('\n')
+		case 't', 'T':
+			b.WriteByte('\t')
+		case ',', ';', '\\':
+			b.WriteByte(s[i])
+		default:
+			b.WriteByte('\\')
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
 }
 
 var (
