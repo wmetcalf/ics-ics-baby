@@ -1926,9 +1926,30 @@ func isRootTokenChar(c byte) bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == ':'
 }
 
+// attrSelector matches [class...=v] and [id...=v] (quoted or not, with an
+// optional i/s flag).
+var attrSelector = regexp.MustCompile(`(?i)\[\s*(class|id)\s*([~|^$*]?=)\s*(["']?)([^"'\]]*)(?:["']?)(\s*[is]?\s*)\]`)
+
 // prefixSelectorNames rewrites .class and #id to .x_class / #x_id, the way
 // OWA namespaces body markup, skipping strings and attribute selectors.
 func prefixSelectorNames(sel string) string {
+	sel = attrSelector.ReplaceAllStringFunc(sel, func(m string) string {
+		p := attrSelector.FindStringSubmatch(m)
+		name, op, q, val := strings.ToLower(p[1]), p[2], p[3], p[4]
+		switch op {
+		case "=":
+			if name == "class" {
+				val = prefixTokens(val) // every class carries x_
+			} else {
+				val = "x_" + strings.TrimSpace(val)
+			}
+		case "~=", "|=", "^=":
+			val = "x_" + val
+		default: // *= and $= match the prefixed values as they are
+			return m
+		}
+		return "[" + p[1] + op + q + val + q + p[5] + "]"
+	})
 	var b strings.Builder
 	depth := 0
 	var quote byte

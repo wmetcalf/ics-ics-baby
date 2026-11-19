@@ -1127,3 +1127,16 @@ func TestSanitizeFinalRound(t *testing.T) {
 		t.Fatalf("refs %+v", s.refs)
 	}
 }
+
+// Attribute selectors on class/id follow the x_ prefix of the attributes.
+func TestAttributeSelectorsPrefixed(t *testing.T) {
+	res, err := OWASanitize(`<style>[class~="mobile"]{display:block!important} [id="message"]{color:red} [class^=hd]{color:blue} [class="a b"]{color:green} span[class=owa-host]{display:none}</style><div class="mobile" style="display:none">x</div>`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`[class~="x_mobile"]`, `[id="x_message"]`, `[class^=x_hd]`, `[class="x_a x_b"]`, `span[class=x_owa-host]`} {
+		if !strings.Contains(res.HTML, want) {
+			t.Errorf("missing %s in %s", want, res.HTML)
+		}
+	}
+}
