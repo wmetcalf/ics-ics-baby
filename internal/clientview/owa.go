@@ -1,0 +1,728 @@
+package clientview
+
+import (
+	"bytes"
+	_ "embed"
+	"fmt"
+	htmlstd "html"
+	"html/template"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+	"unicode"
+
+	"golang.org/x/net/html"
+	"golang.org/x/net/html/atom"
+
+	"ics-ics-baby/internal/icsparse"
+)
+
+// Output names written under the output directory.
+const (
+	OWAHTMLName    = "ics-ics-baby-owa.html"
+	OWASidecarName = "ics-ics-baby-owa.json"
+	OWAPNGName     = "ics-ics-baby-owa.png"
+	InlineDirName  = "ics-ics-baby-inline"
+
+	maxOtherEvents = 50
+)
+
+// Sidecar describes an OWA view: what was rendered and everything that was
+// neutralized, so a pipeline need not re-parse the HTML.
+type Sidecar struct {
+	Profile     string   `json:"profile"`
+	Emulation   bool     `json:"emulation"`
+	Status      string   `json:"status"` // ok | skipped | render_failed
+	Reason      string   `json:"reason,omitempty"`
+	Error       string   `json:"error,omitempty"`
+	InputSHA256 string   `json:"input_sha256"`
+	EventUID    string   `json:"event_uid,omitempty"`
+	OtherEvents []string `json:"other_events,omitempty"`
+	// OtherEventDetails carries the evidence of the events the view does not
+	// render (OWA shows one meeting request per message).
+	OtherEventDetails []EventEvidence `json:"other_event_details,omitempty"`
+	JoinURL           string          `json:"join_url,omitempty"`
+	RemoteRefs        []RemoteRef     `json:"remote_refs"`
+	Links             []Link          `json:"links"`
+	Dropped           []string        `json:"dropped"`
+	BlockedRequests   []string        `json:"blocked_requests"`
+}
+
+// EventEvidence is the sidecar evidence of an event that is not rendered.
+type EventEvidence struct {
+	EventUID   string      `json:"event_uid,omitempty"`
+	Summary    string      `json:"summary"`
+	JoinURL    string      `json:"join_url,omitempty"`
+	RemoteRefs []RemoteRef `json:"remote_refs"`
+	Links      []Link      `json:"links"`
+	Dropped    []string    `json:"dropped"`
+}
+
+//go:embed owa.html.tmpl
+var owaTemplateText string
+
+var owaTemplate = template.Must(template.New("owa").Parse(owaTemplateText))
+
+// owaSanitize is the body sanitizer; a variable so tests can make it fail.
+var owaSanitize = OWASanitize
+
+// SelectEvent picks the event OWA would show as the meeting request.
+// REQUEST, PUBLISH and no METHOD render; CANCEL renders as canceled; any other
+// METHOD, or a calendar without VEVENTs, yields nil and a reason.
+func SelectEvent(cal *icsparse.CalendarInfo) (ev *icsparse.EventInfo, canceled bool, reason string) {
+	if cal == nil || len(cal.Events) == 0 {
+		return nil, false, "no VEVENT"
+	}
+	method := ""
+	if cal.Method != nil {
+		method = strings.ToUpper(strings.TrimSpace(*cal.Method))
+	}
+	switch method {
+	case "", "REQUEST", "PUBLISH":
+		return &cal.Events[0], false, ""
+	case "CANCEL":
+		return &cal.Events[0], true, ""
+	default:
+		return nil, false, fmt.Sprintf("METHOD:%s is not shown as a meeting request", method)
+	}
+}
+
+// JoinURL returns the meeting URL OWA would put behind its Join button, in
+// precedence order X-MICROSOFT-SKYPETEAMSMEETINGURL,
+// X-MICROSOFT-ONLINEMEETINGCONFLINK, then the first CONFERENCE URI. active is
+// true only for an http(s) URL with a host.
+func JoinURL(ev *icsparse.EventInfo) (raw string, active bool) {
+	if ev == nil {
+		return "", false
+	}
+	for _, key := range []string{"X-MICROSOFT-SKYPETEAMSMEETINGURL", "X-MICROSOFT-ONLINEMEETINGCONFLINK"} {
+		if vals := ev.RawProps[key]; len(vals) > 0 && strings.TrimSpace(vals[0]) != "" {
+			raw = strings.TrimSpace(icsparse.UnescapeText(vals[0]))
+			break
+		}
+		if ev.AutoprocessingSignals != nil {
+			if v := strings.TrimSpace(ev.AutoprocessingSignals.MicrosoftHeaders[key]); v != "" {
+				raw = strings.TrimSpace(icsparse.UnescapeText(v))
+				break
+			}
+		}
+	}
+	if raw == "" {
+		for _, c := range ev.Conferences {
+			if strings.TrimSpace(c.URI) != "" {
+				raw = strings.TrimSpace(c.URI)
+				break
+			}
+		}
+	}
+	return raw, isWebURL(raw)
+}
+
+// isWebURL: http(s) scheme, a host, and no whitespace/control characters.
+func isWebURL(raw string) bool {
+	if raw == "" || strings.IndexFunc(raw, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r) || unicode.Is(unicode.Cf, r)
+	}) >= 0 {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	s := strings.ToLower(u.Scheme)
+	return (s == "http" || s == "https") && u.Host != ""
+}
+
+type attachmentView struct {
+	Name string
+	Size string
+}
+
+type owaView struct {
+	Skipped       bool
+	Failed        bool
+	Reason        string
+	Canceled      bool
+	Subject       string
+	Initials      string
+	OrganizerName string
+	OrganizerAddr string
+	When          string
+	Recurrence    string
+	Location      string
+	LocationLink  template.URL
+	LocationHost  string
+	JoinRaw       string
+	JoinActive    bool
+	JoinHref      template.URL
+	JoinHost      string
+	Required      []string
+	Optional      []string
+	BodyIsHTML    bool
+	BodyHTML      template.HTML
+	BodyText      string
+	Attachments   []attachmentView
+	OtherEvents   []string
+	InputSHA256   string
+}
+
+// WriteOWA writes ics-ics-baby-owa.html (and ics-ics-baby-inline/ when the
+// body carries data: images) into outDir and returns the sidecar. It does not
+// write the sidecar or render a PNG; the caller does both.
+func WriteOWA(cal *icsparse.CalendarInfo, inputSHA256, outDir string) (Sidecar, error) {
+	return writeOWAGuarded(cal, inputSHA256, outDir, nil)
+}
+
+func writeOWAGuarded(cal *icsparse.CalendarInfo, inputSHA256, outDir string, g *buildGuard) (Sidecar, error) {
+	sc := Sidecar{
+		Profile:         "owa",
+		Emulation:       true,
+		Status:          "ok",
+		InputSHA256:     inputSHA256,
+		RemoteRefs:      []RemoteRef{},
+		Links:           []Link{},
+		Dropped:         []string{},
+		BlockedRequests: []string{},
+	}
+	view := owaView{InputSHA256: inputSHA256}
+
+	ev, canceled, reason := SelectEvent(cal)
+
+	// The rendered body is sanitized first, so it has the first claim on
+	// the shared inline-image budget.
+	var body *SanitizeResult
+	if ev != nil && g != nil && g.chromeOnly {
+		note := bodyNotRendered
+		if g.budgetNote {
+			note = bodyNotBuilt
+		}
+		body = &SanitizeResult{HTML: note}
+	} else if ev != nil {
+		res, err := sanitizeParts(ev, outDir)
+		if err != nil {
+			return failView(sc, outDir, g, fmt.Errorf("sanitize body: %w", err))
+		}
+		body = res
+	}
+
+	// Evidence of every event the view does not render (all of them when
+	// the view is skipped).
+	if cal != nil {
+		for i := range cal.Events {
+			if &cal.Events[i] == ev {
+				continue
+			}
+			if len(sc.OtherEvents) >= maxOtherEvents {
+				sc.Dropped = append(sc.Dropped, "other_events_capped")
+				break
+			}
+			sc.OtherEvents = append(sc.OtherEvents, clipEvidence(cal.Events[i].Summary))
+			if g != nil && g.chromeOnly {
+				continue // the page only lists them; evidence is the first build's
+			}
+			d, err := eventEvidence(&cal.Events[i], outDir)
+			if err != nil {
+				return failView(sc, outDir, g, fmt.Errorf("sanitize event %d body: %w", i+1, err))
+			}
+			sc.OtherEventDetails = append(sc.OtherEventDetails, d)
+		}
+	}
+
+	if ev == nil {
+		sc.Status = "skipped"
+		sc.Reason = reason
+		view.Skipped = true
+		view.Reason = reason
+		return sc, writeView(outDir, view, g)
+	}
+
+	if ev.UID != nil {
+		sc.EventUID = clipEvidence(*ev.UID)
+	}
+	view.OtherEvents = sc.OtherEvents
+
+	view.Canceled = canceled
+	view.Subject = ev.Summary
+	if canceled {
+		view.Subject = "Canceled: " + ev.Summary
+	}
+
+	view.OrganizerAddr = organizerAddress(ev.Organizer)
+	// Only the CN of the ORGANIZER line whose address is shown (the
+	// signals merge the parameters of every ORGANIZER line).
+	if ev.OrganizerCN != nil {
+		view.OrganizerName = strings.TrimSpace(*ev.OrganizerCN)
+	}
+	if view.OrganizerName == "" {
+		view.OrganizerName = view.OrganizerAddr
+	}
+	if view.OrganizerName == "" {
+		view.OrganizerName = "Unknown organizer"
+	}
+	view.Initials = initials(view.OrganizerName)
+
+	view.When = whenText(ev.DTStart, ev.DTEnd)
+	if ev.Recurrence != nil && ev.Recurrence.RRule != nil {
+		view.Recurrence = "Repeats: " + *ev.Recurrence.RRule
+	}
+
+	if ev.Location != nil {
+		view.Location = strings.TrimSpace(*ev.Location)
+		if isWebURL(view.Location) {
+			u, _ := url.Parse(view.Location)
+			view.LocationLink = template.URL(view.Location)
+			view.LocationHost = displayHost(u.Host)
+		}
+	}
+
+	raw, active := JoinURL(ev)
+	sc.JoinURL = clipEvidence(raw)
+	view.JoinRaw = raw
+	view.JoinActive = active
+	if active {
+		u, _ := url.Parse(raw)
+		view.JoinHref = template.URL(raw)
+		view.JoinHost = displayHost(u.Host)
+	}
+
+	for _, a := range ev.Attendees {
+		label := attendeeLabel(a)
+		role := ""
+		if a.Role != nil {
+			role = strings.ToUpper(strings.TrimSpace(*a.Role))
+		}
+		switch role {
+		case "OPT-PARTICIPANT", "NON-PARTICIPANT":
+			view.Optional = append(view.Optional, label)
+		default: // REQ-PARTICIPANT (the RFC 5545 default) and CHAIR
+			view.Required = append(view.Required, label)
+		}
+	}
+
+	if body != nil {
+		res := *body
+		view.BodyIsHTML = true
+		view.BodyHTML = template.HTML(res.HTML) // sanitized by OWASanitize
+		if res.RemoteRefs != nil {
+			sc.RemoteRefs = res.RemoteRefs
+		}
+		if res.Links != nil {
+			sc.Links = res.Links
+		}
+		sc.Dropped = append(sc.Dropped, res.Dropped...)
+	} else {
+		switch {
+		case ev.Description != nil:
+			view.BodyText = *ev.Description
+		case ev.AltDescRaw != nil:
+			view.BodyText = *ev.AltDescRaw
+		}
+	}
+
+	for _, att := range ev.Attachments {
+		view.Attachments = append(view.Attachments, attachmentView{Name: attachmentName(att), Size: sizeText(att.Size)})
+	}
+
+	capChrome(&view)
+	return sc, writeView(outDir, view, g)
+}
+
+// bodyNotRendered stands in for a body whose rendering failed.
+const bodyNotRendered = `<p class="owa-remote-ref">This capture leaves the message body out: the full page did not render. The body is in the HTML view and the sidecar.</p>`
+
+// bodyNotBuilt stands in for a body the view build ran out of budget on:
+// neither the view HTML nor the sidecar holds it then.
+const bodyNotBuilt = `<p class="owa-remote-ref">This capture leaves the message body out: building the view ran out of its time or memory budget. See the manifest and the preview for the body.</p>`
+
+// OWAChromeHTMLName is the page WriteOWAChromeOnly writes.
+const OWAChromeHTMLName = "ics-ics-baby-owa-chrome.html"
+
+// WriteOWAChromeOnly writes the view page with the body replaced by a note,
+// keeping the trusted chrome (subject, organizer, time, RSVP, Join,
+// attendees, attachments), to its own file (the view HTML keeps the body)
+// and returns its path. The CLI renders it when the full page fails to
+// render (e.g. body CSS too costly to paint), so the chrome is still
+// captured.
+// The sidecar it returns carries the chrome fields (event UID, join URL,
+// other events) but no body evidence.
+// budgetExceeded selects the note for a body whose build ran out of budget.
+func WriteOWAChromeOnly(cal *icsparse.CalendarInfo, inputSHA256, outDir string, budgetExceeded bool) (Sidecar, string, error) {
+	sc, err := writeOWAGuarded(cal, inputSHA256, outDir, &buildGuard{chromeOnly: true, budgetNote: budgetExceeded, htmlName: OWAChromeHTMLName})
+	return sc, filepath.Join(outDir, OWAChromeHTMLName), err
+}
+
+// maxChromeItems bounds each list of the view's chrome (attendees,
+// attachments, other events): an attacker-sized list must not push the
+// rest of the chrome and the body past the capture height.
+const maxChromeItems = 50
+
+func capChrome(v *owaView) {
+	capList := func(l []string) []string {
+		if len(l) <= maxChromeItems {
+			return l
+		}
+		out := append([]string(nil), l[:maxChromeItems]...)
+		return append(out, fmt.Sprintf("… and %d more", len(l)-maxChromeItems))
+	}
+	v.Required, v.Optional, v.OtherEvents = capList(v.Required), capList(v.Optional), capList(v.OtherEvents)
+	if n := len(v.Attachments); n > maxChromeItems {
+		v.Attachments = append(append([]attachmentView(nil), v.Attachments[:maxChromeItems]...),
+			attachmentView{Name: fmt.Sprintf("… and %d more", n-maxChromeItems)})
+	}
+}
+
+// maxAltDescParts bounds the HTML X-ALT-DESC parts sanitized per event.
+const maxAltDescParts = 8
+
+// sanitizeParts sanitizes the FMTTYPE=text/html X-ALT-DESC parts of ev
+// (nil when it has none). The HTML is the last part with visible content
+// (text or an image), else the last part: the preview also shows the last
+// HTML part, and a trailing empty or script-only part does not blank the
+// body. Parts are sanitized last first, so the shown part has the first
+// claim on the shared inline-image budget. Only the last maxAltDescParts
+// are sanitized; the links and references of earlier ones are read from
+// their tokens. The evidence of every part is merged; drop codes of parts
+// that are not shown are prefixed "alt_part:".
+func sanitizeParts(ev *icsparse.EventInfo, outDir string) (*SanitizeResult, error) {
+	parts := ev.AltDescHTMLParts
+	if len(parts) == 0 {
+		return nil, nil
+	}
+	merged := &SanitizeResult{}
+	refSeen, linkSeen, dropSeen := map[RemoteRef]bool{}, map[Link]bool{}, map[string]bool{}
+	addDrop := func(d string) {
+		if !dropSeen[d] {
+			dropSeen[d] = true
+			merged.Dropped = append(merged.Dropped, d)
+		}
+	}
+	addEvidence := func(refs []RemoteRef, links []Link) {
+		for _, r := range refs {
+			if !refSeen[r] {
+				if len(merged.RemoteRefs) >= maxRecorded {
+					addDrop("refs_capped")
+					break
+				}
+				refSeen[r] = true
+				merged.RemoteRefs = append(merged.RemoteRefs, r)
+			}
+		}
+		for _, l := range links {
+			if !linkSeen[l] {
+				if len(merged.Links) >= maxRecorded {
+					addDrop("links_capped")
+					break
+				}
+				linkSeen[l] = true
+				merged.Links = append(merged.Links, l)
+			}
+		}
+	}
+	var results []SanitizeResult // last part first
+	chosen := -1
+	start := 0
+	if len(parts) > maxAltDescParts {
+		start = len(parts) - maxAltDescParts
+	}
+	for i := len(parts) - 1; i >= start; i-- {
+		res, err := owaSanitize(parts[i], filepath.Join(outDir, InlineDirName))
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, res)
+		if chosen < 0 && visibleHTML(res.HTML) {
+			chosen = len(results) - 1
+		}
+	}
+	if chosen < 0 {
+		chosen = 0 // the last part
+	}
+	merged.HTML = results[chosen].HTML
+	for _, d := range results[chosen].Dropped {
+		addDrop(d)
+	}
+	if start > 0 || ev.AltDescHTMLPartsDropped > 0 {
+		addDrop("alt_desc_parts_capped")
+	}
+	// Evidence in document order: earliest part first.
+	if start > 0 {
+		s := newSanitizer("") // one sanitizer: its caps hold across these parts
+		for i := 0; i < start; i++ {
+			s.tokenEvidence(parts[i])
+		}
+		addEvidence(s.refs, s.links)
+		for _, d := range s.dropped { // refs_capped / links_capped
+			addDrop(d)
+		}
+	}
+	for i := len(results) - 1; i >= 0; i-- {
+		addEvidence(results[i].RemoteRefs, results[i].Links)
+		if i != chosen {
+			for _, d := range results[i].Dropped {
+				addDrop("alt_part:" + d)
+			}
+		}
+	}
+	return merged, nil
+}
+
+// visibleHTML: the sanitized fragment shows text, an image or one of the
+// sanitizer's own placeholders. It is read with the HTML parser: style text
+// is not content, and attacker attributes cannot pose as placeholders
+// (their classes carry the x_ prefix).
+func visibleHTML(h string) bool {
+	ctx := &html.Node{Type: html.ElementNode, Data: "div", DataAtom: atom.Div}
+	nodes, err := html.ParseFragment(strings.NewReader(h), ctx)
+	if err != nil {
+		return strings.TrimSpace(h) != ""
+	}
+	stack := append([]*html.Node(nil), nodes...)
+	for len(stack) > 0 {
+		n := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		switch n.Type {
+		case html.TextNode:
+			if strings.TrimSpace(n.Data) != "" {
+				return true
+			}
+		case html.ElementNode:
+			switch n.DataAtom {
+			case atom.Style:
+				continue
+			case atom.Img, atom.Svg:
+				return true
+			}
+			for _, a := range n.Attr {
+				if a.Namespace == "" && a.Key == "class" && a.Val == "owa-remote-ref" {
+					return true
+				}
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			stack = append(stack, c)
+		}
+	}
+	return false
+}
+
+// failView records a build failure in the sidecar and writes a page that
+// states it, so the HTML always exists alongside a render_failed sidecar.
+func failView(sc Sidecar, outDir string, g *buildGuard, cause error) (Sidecar, error) {
+	sc.Status = "render_failed"
+	sc.Error = cause.Error()
+	view := owaView{Failed: true, Reason: cause.Error(), InputSHA256: sc.InputSHA256}
+	if err := writeView(outDir, view, g); err != nil {
+		return sc, fmt.Errorf("%v; and writing the failure page: %w", cause, err)
+	}
+	return sc, cause
+}
+
+// eventEvidence sanitizes an unrendered event's HTML body for its references
+// (writing its inline images like the rendered event's) and its join URL.
+func eventEvidence(ev *icsparse.EventInfo, outDir string) (EventEvidence, error) {
+	d := EventEvidence{Summary: clipEvidence(ev.Summary), RemoteRefs: []RemoteRef{}, Links: []Link{}, Dropped: []string{}}
+	if ev.UID != nil {
+		d.EventUID = clipEvidence(*ev.UID)
+	}
+	d.JoinURL, _ = JoinURL(ev)
+	d.JoinURL = clipEvidence(d.JoinURL)
+	if res, err := sanitizeParts(ev, outDir); err != nil {
+		return d, err
+	} else if res != nil {
+		if res.RemoteRefs != nil {
+			d.RemoteRefs = res.RemoteRefs
+		}
+		if res.Links != nil {
+			d.Links = res.Links
+		}
+		if res.Dropped != nil {
+			d.Dropped = res.Dropped
+		}
+	}
+	return d, nil
+}
+
+// bidiControls reorder neighbouring text: in a subject, location or
+// attendee they could reverse the view's own labels (a trailing U+202E in
+// LOCATION painted the host label "(moc.tfosorcim.ai)" as
+// "(ia.microsoft.com)"). They are shown as U+FFFD instead.
+var bidiControls = strings.NewReplacer(
+	"\u202a", "\ufffd", "\u202b", "\ufffd", "\u202c", "\ufffd", "\u202d", "\ufffd", "\u202e", "\ufffd",
+	"\u2066", "\ufffd", "\u2067", "\ufffd", "\u2068", "\ufffd", "\u2069", "\ufffd",
+	"\u200e", "\ufffd", "\u200f", "\ufffd", "\u061c", "\ufffd",
+)
+
+// maxChromeText bounds each attacker string in the chrome: the page shows a
+// few lines at most, and Chromium shapes and lays out every byte (650 KB of
+// mixed-direction SUMMARY took longer than the render timeout).
+const maxChromeText = 300
+
+func clipChrome(s string) string {
+	if len(s) <= maxChromeText {
+		return s
+	}
+	return truncateUTF8(s, maxChromeText) + "…"
+}
+
+// neutralizeBidi cleans every attacker-supplied string of the view chrome.
+func neutralizeBidi(v *owaView) {
+	c := func(s string) string { return bidiControls.Replace(clipChrome(s)) }
+	v.Reason, v.Subject, v.Initials = c(v.Reason), c(v.Subject), c(v.Initials)
+	v.OrganizerName, v.OrganizerAddr, v.When, v.Recurrence = c(v.OrganizerName), c(v.OrganizerAddr), c(v.When), c(v.Recurrence)
+	v.Location, v.LocationHost, v.JoinRaw, v.JoinHost = c(v.Location), c(v.LocationHost), c(v.JoinRaw), c(v.JoinHost)
+	v.BodyText = bidiControls.Replace(v.BodyText) // the body: not clipped like chrome text
+	for i := range v.Required {
+		v.Required[i] = c(v.Required[i])
+	}
+	for i := range v.Optional {
+		v.Optional[i] = c(v.Optional[i])
+	}
+	for i := range v.Attachments {
+		v.Attachments[i].Name = c(v.Attachments[i].Name)
+	}
+	others := make([]string, len(v.OtherEvents)) // (shared with the sidecar)
+	for i, e := range v.OtherEvents {
+		others[i] = c(e)
+	}
+	v.OtherEvents = others
+}
+
+func writeView(outDir string, view owaView, g *buildGuard) error {
+	name := OWAHTMLName
+	if g != nil && g.htmlName != "" {
+		name = g.htmlName
+	}
+	neutralizeBidi(&view)
+	// Under g.mu only the final file write: WriteOWABudgeted must be able
+	// to abandon the build while the template executes.
+	locked := func(write func() error) error {
+		if g == nil {
+			return write()
+		}
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		if g.abandoned {
+			// WriteOWABudgeted gave up on this build and wrote a failure
+			// page; this write must not replace it.
+			return fmt.Errorf("view build abandoned")
+		}
+		return write()
+	}
+	var buf bytes.Buffer
+	if err := owaTemplate.Execute(&buf, view); err != nil {
+		// Last resort: a static page naming the failure.
+		buf.Reset()
+		fmt.Fprintf(&buf, "<!doctype html><meta charset=utf-8><title>view failed</title><p>View failed: %s</p><p>Emulated Outlook-on-the-web rendering — ics-ics-baby · input sha256 %s</p>",
+			htmlstd.EscapeString("render owa template: "+err.Error()), htmlstd.EscapeString(view.InputSHA256))
+		_ = locked(func() error {
+			if werr := os.MkdirAll(outDir, 0o755); werr != nil {
+				return werr
+			}
+			return os.WriteFile(filepath.Join(outDir, name), buf.Bytes(), 0o644)
+		})
+		return fmt.Errorf("render owa template: %w", err)
+	}
+	return locked(func() error {
+		if err := os.MkdirAll(outDir, 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(outDir, name), buf.Bytes(), 0o644)
+	})
+}
+
+func organizerAddress(org *string) string {
+	if org == nil {
+		return ""
+	}
+	v := strings.TrimSpace(*org)
+	if len(v) >= 7 && strings.EqualFold(v[:7], "mailto:") {
+		v = v[7:]
+	}
+	return v
+}
+
+func attendeeLabel(a icsparse.Attendee) string {
+	addr := organizerAddress(&a.Mailto)
+	if a.CN != nil && strings.TrimSpace(*a.CN) != "" {
+		if addr != "" {
+			// A long CN must not push the address out of the clipped line.
+			cn := strings.TrimSpace(*a.CN)
+			if len(cn) > 80 {
+				cn = truncateUTF8(cn, 80) + "…"
+			}
+			return cn + " <" + addr + ">"
+		}
+		return strings.TrimSpace(*a.CN)
+	}
+	return addr
+}
+
+func initials(name string) string {
+	var out []rune
+	for _, f := range strings.Fields(name) {
+		for _, r := range f {
+			if unicode.IsLetter(r) || unicode.IsDigit(r) {
+				out = append(out, unicode.ToUpper(r))
+				break
+			}
+		}
+		if len(out) == 2 {
+			break
+		}
+	}
+	if len(out) == 0 {
+		return "?"
+	}
+	return string(out)
+}
+
+// formatTime matches the preview's webview.formatTimeValue.
+func formatTime(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	if loc := t.Location(); loc != nil && loc != time.UTC {
+		return t.Format("Monday, January 2, 2006 at 3:04 PM MST")
+	}
+	return t.Format("Monday, January 2, 2006 at 15:04 UTC")
+}
+
+func whenText(start, end *time.Time) string {
+	s, e := formatTime(start), formatTime(end)
+	switch {
+	case s != "" && e != "":
+		return s + " – " + e
+	case s != "":
+		return s
+	default:
+		return e
+	}
+}
+
+func attachmentName(a icsparse.AttachmentInfo) string {
+	for _, p := range []*string{a.SavedAs, a.Href} {
+		if p != nil && strings.TrimSpace(*p) != "" {
+			return filepath.Base(strings.TrimSpace(*p))
+		}
+	}
+	if a.Fmt != nil && *a.Fmt != "" {
+		return "attachment (" + *a.Fmt + ")"
+	}
+	return "attachment"
+}
+
+func sizeText(n *int) string {
+	if n == nil || *n < 0 {
+		return ""
+	}
+	switch v := float64(*n); {
+	case v >= 1<<20:
+		return fmt.Sprintf("%.1f MB", v/(1<<20))
+	case v >= 1<<10:
+		return fmt.Sprintf("%.0f KB", v/(1<<10))
+	default:
+		return fmt.Sprintf("%d bytes", *n)
+	}
+}

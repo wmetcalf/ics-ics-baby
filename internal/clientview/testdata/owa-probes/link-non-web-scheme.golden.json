@@ -1,0 +1,18 @@
+{
+  "remote_refs": null,
+  "links": [
+    {
+      "href": "search-ms:query=invoice\u0026crumb=location:\\\\attacker.test\\share",
+      "host": "",
+      "text": "Open invoice"
+    },
+    {
+      "href": "\\\\attacker.test\\share\\doc.lnk",
+      "host": "attacker.test",
+      "text": "unc"
+    }
+  ],
+  "dropped": [
+    "attr:href:inert"
+  ]
+}

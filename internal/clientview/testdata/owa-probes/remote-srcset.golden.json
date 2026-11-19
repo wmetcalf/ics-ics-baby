@@ -1,0 +1,18 @@
+{
+  "remote_refs": [
+    {
+      "kind": "remote",
+      "value": "http://evil.test/a.png",
+      "host": "evil.test"
+    },
+    {
+      "kind": "remote",
+      "value": "https://cdn.evil.test/b.png",
+      "host": "cdn.evil.test"
+    }
+  ],
+  "links": null,
+  "dropped": [
+    "attr:srcset"
+  ]
+}

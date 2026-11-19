@@ -1,0 +1,8 @@
+{
+  "remote_refs": null,
+  "links": null,
+  "dropped": [
+    "element:script",
+    "attr:href:javascript"
+  ]
+}

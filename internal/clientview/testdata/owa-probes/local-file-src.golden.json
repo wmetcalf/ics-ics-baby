@@ -1,0 +1,15 @@
+{
+  "remote_refs": [
+    {
+      "kind": "local",
+      "value": "file:///C:/Windows/win.ini"
+    },
+    {
+      "kind": "local",
+      "value": "file://attacker.test/share/x.png",
+      "host": "attacker.test"
+    }
+  ],
+  "links": null,
+  "dropped": null
+}

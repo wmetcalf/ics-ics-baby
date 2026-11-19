@@ -1,0 +1,10 @@
+{
+  "remote_refs": [
+    {
+      "kind": "cid",
+      "value": "cid:image001.png@01D9"
+    }
+  ],
+  "links": null,
+  "dropped": null
+}

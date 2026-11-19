@@ -1,0 +1,14 @@
+{
+  "remote_refs": null,
+  "links": [
+    {
+      "href": "page",
+      "host": "",
+      "text": "rel"
+    }
+  ],
+  "dropped": [
+    "element:base",
+    "attr:href:inert"
+  ]
+}

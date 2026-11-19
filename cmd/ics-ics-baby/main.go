@@ -8,10 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
 	"ics-ics-baby/internal/attach"
+	"ics-ics-baby/internal/clientview"
 	"ics-ics-baby/internal/icsparse"
 	"ics-ics-baby/internal/render"
 	"ics-ics-baby/internal/webview"
@@ -87,12 +89,23 @@ func main() {
 	var wkhtmlArgs multiFlag
 	var wkhtmlAllowPath multiFlag
 	var hideSecurityAlerts bool
+	var chromiumBin string
+	var chromiumTimeout time.Duration
+	var chromiumNoSandbox bool
+	var chromiumMaxHeight int
+	var inviteView string
+	var findingsJSON bool
+	var maxAttachments int
+	var listFindingCodes bool
+	var owaBuildTimeout time.Duration
 
 	flag.StringVar(&outDir, "out", "out", "Output directory")
 	flag.StringVar(&screenshot, "screenshot", "", "Output PNG path (default: OUT/preview.png)")
 	flag.StringVar(&htmlOut, "html", "", "Output HTML path (default: OUT/preview.html)")
 	flag.BoolVar(&download, "download-attachments", false, "Download URL attachments")
 	flag.Int64Var(&maxAttachBytes, "max-attachment-bytes", 100<<20, "Maximum size to allow per attachment in bytes (default 100 MiB)")
+	flag.BoolVar(&listFindingCodes, "list-finding-codes", false, "Print every finding code and its severity as JSON, then exit")
+	flag.IntVar(&maxAttachments, "max-attachments", 0, "Maximum number of attachments saved or downloaded per calendar; failed attempts count (0 = unlimited)")
 	flag.Int64Var(&maxICSBytes, "max-ics-bytes", 500<<20, "Maximum size to allow for ICS file in bytes (default 500 MiB)")
 	flag.StringVar(&tzDefault, "timezone", "", "Default timezone for naive dates (e.g., America/Chicago)")
 	flag.StringVar(&startStr, "start", "", "Filter start date (YYYY-MM-DD) inclusive")
@@ -100,13 +113,20 @@ func main() {
 	flag.StringVar(&style, "style", "light", "Render style: light or dark")
 	flag.IntVar(&width, "width", 1200, "PNG width in pixels")
 	flag.StringVar(&view, "view", "invite", "PNG view: invite or agenda")
-	flag.StringVar(&screenshotEngine, "screenshot-engine", "go", "PNG renderer: go or wkhtml")
+	flag.StringVar(&screenshotEngine, "screenshot-engine", "go", "PNG renderer: go, wkhtml or chromium")
 	flag.StringVar(&wkhtmlBin, "wkhtml-bin", "wkhtmltoimage", "Path to wkhtmltoimage binary")
 	flag.StringVar(&wkhtmlWrapBin, "wkhtml-wrap", "wkhtml-wrap", "Path to wkhtml-wrap sandbox binary (use empty string to disable sandbox)")
 	flag.BoolVar(&wkhtmlAllowNetwork, "wkhtml-allow-network", false, "Allow wkhtmltoimage to contact remote hosts (defaults to blocking via a dead proxy)")
 	flag.DurationVar(&wkhtmlTimeout, "wkhtml-timeout", 45*time.Second, "Timeout for wkhtmltoimage execution")
 	flag.Var(&wkhtmlArgs, "wkhtml-arg", "Additional argument passed straight to wkhtmltoimage (repeatable)")
 	flag.Var(&wkhtmlAllowPath, "wkhtml-allow-path", "Allow wkhtmltoimage to read this path when local file access is otherwise disabled (repeatable)")
+	flag.StringVar(&chromiumBin, "chromium-bin", "", "Path to headless Chromium (default: search PATH for chromium, chromium-browser, google-chrome, headless_shell)")
+	flag.DurationVar(&chromiumTimeout, "chromium-timeout", 45*time.Second, "Timeout for each headless Chromium render")
+	flag.BoolVar(&chromiumNoSandbox, "chromium-no-sandbox", false, "Disable the Chromium sandbox (only for containers that cannot provide it)")
+	flag.IntVar(&chromiumMaxHeight, "chromium-max-height", 20000, "Maximum Chromium capture height in pixels")
+	flag.DurationVar(&owaBuildTimeout, "owa-build-timeout", 30*time.Second, "Time limit for building the --invite-view page (sanitizing the bodies), before Chromium renders it")
+	flag.StringVar(&inviteView, "invite-view", "", "Also write an emulated client view of the invite: owa (rendered with headless Chromium)")
+	flag.BoolVar(&findingsJSON, "findings-json", false, "Also write stable-coded findings to OUT/ics-ics-baby-findings.json")
 	flag.BoolVar(&hideSecurityAlerts, "hide-security-alerts", false, "Hide security alert warnings in HTML/PNG output (default: show alerts)")
 
 	flag.Parse()
@@ -117,6 +137,13 @@ func main() {
 			fmt.Printf("ics-ics-baby %s (commit %s, built %s) %s\n", Version, Commit, Date, runtime.GOOS+"/"+runtime.GOARCH)
 			return
 		}
+	}
+
+	if listFindingCodes {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(icsparse.FindingCodes()) // map keys are emitted sorted
+		return
 	}
 
 	if download {
@@ -140,15 +167,25 @@ func main() {
 		fmt.Println("\nAttachment options:")
 		fmt.Println("  --download-attachments          Download URL attachments (contacts remote hosts)")
 		fmt.Println("  --max-attachment-bytes N        Maximum size per attachment in bytes (default: 100 MiB)")
+		fmt.Println("  --max-attachments N             Maximum attachments saved or downloaded per calendar, failed attempts included (default: unlimited)")
 		fmt.Println("  --max-ics-bytes N               Maximum ICS file size in bytes (default: 500 MiB)")
+		fmt.Println("\nClient view options:")
+		fmt.Println("  --list-finding-codes            Print every finding code and severity as JSON and exit")
+		fmt.Println("  --findings-json                 Also write stable-coded findings (ics-ics-baby-findings.json)")
+		fmt.Println("  --invite-view owa               Also write an emulated Outlook-on-the-web view (HTML, sidecar JSON, PNG via Chromium)")
+		fmt.Println("  --owa-build-timeout DURATION    Time limit for building that view before rendering (default: 30s)")
 		fmt.Println("\nScreenshot engine options:")
-		fmt.Println("  --screenshot-engine go|wkhtml   PNG renderer (default: go)")
+		fmt.Println("  --screenshot-engine go|wkhtml|chromium  PNG renderer (default: go)")
 		fmt.Println("  --wkhtml-bin PATH               Path to wkhtmltoimage binary (default: wkhtmltoimage)")
 		fmt.Println("  --wkhtml-wrap PATH              Path to wkhtml-wrap sandbox binary (default: wkhtml-wrap)")
 		fmt.Println("  --wkhtml-allow-network          Allow wkhtmltoimage network access (default: blocked)")
 		fmt.Println("  --wkhtml-timeout DURATION       Timeout for wkhtmltoimage (default: 45s)")
 		fmt.Println("  --wkhtml-arg ARG                Additional wkhtmltoimage argument (repeatable)")
 		fmt.Println("  --wkhtml-allow-path PATH        Allow wkhtmltoimage to read this path (repeatable)")
+		fmt.Println("  --chromium-bin PATH             Headless Chromium binary (default: search PATH)")
+		fmt.Println("  --chromium-timeout DURATION     Timeout per Chromium render (default: 45s)")
+		fmt.Println("  --chromium-no-sandbox           Disable the Chromium sandbox (containers only)")
+		fmt.Println("  --chromium-max-height N         Maximum Chromium capture height (default: 20000)")
 		fmt.Println("\nExamples:")
 		fmt.Println("  # Basic usage with defaults")
 		fmt.Println("  ics-ics-baby meeting.ics")
@@ -170,6 +207,11 @@ func main() {
 		os.Exit(2)
 	}
 	icsPath := flag.Arg(0)
+
+	if inviteView != "" && inviteView != "owa" {
+		fmt.Fprintf(os.Stderr, "unknown invite view %q (supported: owa)\n", inviteView)
+		os.Exit(1)
+	}
 
 	// Sanitize input ICS path
 	sanitizedICSPath, err := sanitizeOutputPath(icsPath)
@@ -215,7 +257,7 @@ func main() {
 		cal.FilterRange(start, end)
 	}
 
-	if err := attach.ExtractAll(cal, outDir, download, maxAttachBytes); err != nil {
+	if err := attach.ExtractAllLimited(cal, outDir, download, maxAttachBytes, maxAttachments); err != nil {
 		fmt.Fprintf(os.Stderr, "attachment error: %v\n", err)
 	}
 
@@ -230,6 +272,32 @@ func main() {
 		_ = f.Close()
 	} else {
 		fmt.Fprintf(os.Stderr, "failed to write manifest: %v\n", err)
+	}
+
+	inputSHA := cal.InputSHA256 // hash of the exact bytes parsed
+
+	findingsPath := ""
+	findingsFailed := false
+	if findingsJSON {
+		p := filepath.Join(outDir, "ics-ics-baby-findings.json")
+		// A previous run's findings must not survive a failed write.
+		err := os.Remove(p)
+		if errors.Is(err, os.ErrNotExist) {
+			err = nil
+		}
+		var b []byte
+		if err == nil {
+			b, err = json.MarshalIndent(icsparse.FindingsDoc(cal, inputSHA), "", "  ")
+		}
+		if err == nil {
+			err = os.WriteFile(p, append(b, '\n'), 0o644)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to write findings: %v\n", err)
+			findingsFailed = true
+		} else {
+			findingsPath = p
+		}
 	}
 
 	if htmlOut == "" {
@@ -259,9 +327,26 @@ func main() {
 	}
 	screenshot = sanitizedScreenshot
 
+	chromiumOpts := render.ChromiumSettings{
+		Bin:       chromiumBin,
+		Timeout:   chromiumTimeout,
+		NoSandbox: chromiumNoSandbox,
+		MaxHeight: chromiumMaxHeight,
+	}
+
+	previewFailed := false
 	switch view {
 	case "invite":
-		if screenshotEngine == "wkhtml" {
+		if screenshotEngine == "chromium" {
+			blocked, err := render.RenderHTMLWithChromium(htmlOut, screenshot, width, chromiumOpts)
+			for _, u := range blocked {
+				fmt.Fprintf(os.Stderr, "[chromium] blocked: %s\n", u)
+			}
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "chromium render error: %v\n", err)
+				previewFailed = true
+			}
+		} else if screenshotEngine == "wkhtml" {
 			opts := render.WKHTMLSettings{
 				Bin:          wkhtmlBin,
 				WrapperBin:   wkhtmlWrapBin,
@@ -272,22 +357,178 @@ func main() {
 			}
 			if err := render.RenderInvitePNGWithWKHTML(htmlOut, screenshot, width, opts); err != nil {
 				fmt.Fprintf(os.Stderr, "wkhtml render error: %v\n", err)
-				os.Exit(1)
+				previewFailed = true
 			}
 		} else {
 			if err := render.RenderInvitePNG(cal, screenshot, width, style, showSecurityAlerts); err != nil {
 				fmt.Fprintf(os.Stderr, "render error: %v\n", err)
-				os.Exit(1)
+				previewFailed = true
 			}
 		}
 	default:
 		if err := render.RenderAgendaPNG(cal, screenshot, width, style); err != nil {
 			fmt.Fprintf(os.Stderr, "render error: %v\n", err)
-			os.Exit(1)
+			previewFailed = true
 		}
 	}
 
+	if previewFailed && inviteView == "" {
+		// Unchanged behaviour without --invite-view: stop after the error.
+		os.Exit(1)
+	}
+
+	owaFailed := false
+	var owaWritten []string
+	if inviteView == "owa" {
+		owaFailed, owaWritten = writeOWAView(cal, inputSHA, outDir, width, chromiumOpts, owaBuildTimeout)
+	}
+
 	fmt.Println("Wrote manifest:", manifestPath)
+	if findingsPath != "" {
+		fmt.Println("Wrote findings:", findingsPath)
+	}
 	fmt.Println("Wrote HTML preview:", htmlOut)
-	fmt.Println("Wrote PNG screenshot:", screenshot)
+	if !previewFailed {
+		fmt.Println("Wrote PNG screenshot:", screenshot)
+	}
+	for _, line := range owaWritten {
+		fmt.Println(line)
+	}
+	if previewFailed || owaFailed || findingsFailed {
+		os.Exit(1)
+	}
+}
+
+// writeOWAView writes the OWA HTML, renders its PNG with Chromium and then
+// writes the sidecar, which records the render outcome. It returns whether a
+// requested step failed and the "Wrote ..." lines for files that exist.
+// renderOWAChromeOnly writes the view without its body and renders it,
+// with a short timeout: the chrome alone renders in about a second.
+// A skipped view is not rendered (there is no PNG for one): its page
+// replaces htmlPath instead. A capture cut at the height cap is recorded.
+func renderOWAChromeOnly(cal *icsparse.CalendarInfo, inputSHA, outDir, htmlPath, pngPath string, width int, opts render.ChromiumSettings, budgetExceeded bool) (clientview.Sidecar, error) {
+	chromeSC, chromePath, err := clientview.WriteOWAChromeOnly(cal, inputSHA, outDir, budgetExceeded)
+	defer os.Remove(chromePath) // a render input only; the view HTML keeps the body
+	if err != nil {
+		return chromeSC, err
+	}
+	if chromeSC.Status == "skipped" {
+		return chromeSC, os.Rename(chromePath, htmlPath)
+	}
+	if opts.Timeout <= 0 || opts.Timeout > 15*time.Second {
+		opts.Timeout = 15 * time.Second
+	}
+	res, err := render.RenderHTMLWithChromiumResult(chromePath, pngPath, width, opts)
+	if err == nil && res.Truncated {
+		chromeSC.Dropped = append(chromeSC.Dropped, "capture_truncated")
+	}
+	if err == nil && budgetExceeded {
+		// The view HTML is only a failure page then: the chrome-only page
+		// (what the PNG shows) replaces it.
+		err = os.Rename(chromePath, htmlPath)
+	}
+	return chromeSC, err
+}
+
+// owaBuildMaxHeap bounds the Go heap while building the OWA view.
+const owaBuildMaxHeap = 2 << 30
+
+func writeOWAView(cal *icsparse.CalendarInfo, inputSHA, outDir string, width int, opts render.ChromiumSettings, buildTimeout time.Duration) (failed bool, wrote []string) {
+	htmlPath := filepath.Join(outDir, clientview.OWAHTMLName)
+	sidecarPath := filepath.Join(outDir, clientview.OWASidecarName)
+	pngPath := filepath.Join(outDir, clientview.OWAPNGName)
+
+	// Outputs from an earlier run into the same directory must not survive
+	// next to this run's sidecar.
+	for _, stale := range []string{htmlPath, sidecarPath, pngPath, filepath.Join(outDir, clientview.OWAChromeHTMLName), filepath.Join(outDir, clientview.InlineDirName)} {
+		if err := os.RemoveAll(stale); err != nil {
+			fmt.Fprintf(os.Stderr, "owa view: remove stale %s: %v\n", stale, err)
+		}
+	}
+
+	sc, err := clientview.WriteOWABudgeted(cal, inputSHA, outDir, buildTimeout, owaBuildMaxHeap)
+	htmlOK := err == nil
+	if err != nil {
+		sc.Status = "render_failed"
+		sc.Error = err.Error()
+		failed = true
+		fmt.Fprintf(os.Stderr, "owa view error: %v\n", err)
+		if slices.Contains(sc.Dropped, "build_budget_exceeded") {
+			// Sanitizing the bodies ran out of budget: still capture the
+			// trusted chrome (its build sanitizes nothing).
+			if csc, ferr := renderOWAChromeOnly(cal, inputSHA, outDir, htmlPath, pngPath, width, opts, true); ferr == nil {
+				if csc.Status == "skipped" {
+					csc.Dropped = append([]string{"build_budget_exceeded"}, csc.Dropped...)
+				} else {
+					csc.Dropped = append([]string{"build_budget_exceeded", "body_render_failed"}, csc.Dropped...)
+					fmt.Fprintln(os.Stderr, "owa view: rendered without its body")
+				}
+				sc, failed = csc, false
+				// The abandoned build's inline images are not in this
+				// sidecar (best effort: that goroutine may still be writing).
+				_ = os.RemoveAll(filepath.Join(outDir, clientview.InlineDirName))
+			} else {
+				_ = os.Remove(pngPath)
+				// No sidecar lists the abandoned build's inline images.
+				_ = os.RemoveAll(filepath.Join(outDir, clientview.InlineDirName))
+				sc.Error += "; rendering without the body failed too: " + ferr.Error()
+				fmt.Fprintf(os.Stderr, "owa chromium render error (without body): %v\n", ferr)
+			}
+		}
+	}
+	if _, statErr := os.Stat(htmlPath); statErr == nil {
+		wrote = append(wrote, "Wrote OWA view: "+htmlPath) // a failure page when err != nil
+	}
+
+	if htmlOK && sc.Status == "ok" {
+		res, err := render.RenderHTMLWithChromiumResult(htmlPath, pngPath, width, opts)
+		if res.Blocked != nil {
+			sc.BlockedRequests = res.Blocked
+		}
+		if res.Truncated {
+			// The PNG stops at --chromium-max-height; the page went on.
+			sc.Dropped = append(sc.Dropped, "capture_truncated")
+		}
+		if res.BlockedCapped {
+			sc.Dropped = append(sc.Dropped, "blocked_requests_capped")
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "owa chromium render error: %v\n", err)
+			_ = os.Remove(pngPath)
+			// The body (e.g. CSS too costly to paint) must not cost the
+			// trusted chrome its capture: render the page once more with
+			// the body replaced by a note.
+			if csc, ferr := renderOWAChromeOnly(cal, inputSHA, outDir, htmlPath, pngPath, width, opts, false); ferr == nil {
+				sc.Dropped = append(sc.Dropped, "body_render_failed")
+				if slices.Contains(csc.Dropped, "capture_truncated") && !slices.Contains(sc.Dropped, "capture_truncated") {
+					sc.Dropped = append(sc.Dropped, "capture_truncated")
+				}
+				fmt.Fprintln(os.Stderr, "owa view: rendered without its body")
+			} else {
+				sc.Status = "render_failed"
+				sc.Error = err.Error()
+				failed = true
+				_ = os.Remove(pngPath)
+				fmt.Fprintf(os.Stderr, "owa chromium render error (without body): %v\n", ferr)
+			}
+		}
+	}
+
+	if b, err := json.MarshalIndent(sc, "", "  "); err == nil {
+		if err := os.WriteFile(sidecarPath, append(b, '\n'), 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to write owa sidecar: %v\n", err)
+			failed = true
+		} else {
+			wrote = append(wrote, "Wrote OWA sidecar: "+sidecarPath)
+		}
+	}
+	if sc.Status == "ok" && pathExists(pngPath) {
+		wrote = append(wrote, "Wrote OWA PNG: "+pngPath)
+	}
+	return failed, wrote
+}
+
+func pathExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }

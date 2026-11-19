@@ -28,6 +28,7 @@ const (
 
 var (
 	errAttachmentTooLarge = errors.New("attachment exceeds maximum size limit")
+	errAttachmentLimit    = errors.New("attachment limit reached")
 	errPathTraversal      = errors.New("path traversal detected")
 )
 
@@ -67,6 +68,15 @@ func validatePath(path, allowedDir string) error {
 // saved attachment is bounded by maxBytes; oversized or failing downloads are
 // skipped and reported via stderr while processing continues.
 func ExtractAll(cal *icsparse.CalendarInfo, outDir string, download bool, maxBytes int64) error {
+	return ExtractAllLimited(cal, outDir, download, maxBytes, 0)
+}
+
+// ExtractAllLimited is ExtractAll with a cap on the number of attachments
+// processed for the whole calendar (0 = unlimited). Every save or download
+// attempt counts, failed ones included, so the cap also bounds the requests
+// made with download enabled. Attachments past the cap are left unsaved and
+// an error naming the limit is returned.
+func ExtractAllLimited(cal *icsparse.CalendarInfo, outDir string, download bool, maxBytes int64, maxFiles int) error {
 	attDir := filepath.Join(outDir, "ics-ics-baby-attachments")
 	if err := os.MkdirAll(attDir, 0o755); err != nil {
 		return err
@@ -76,6 +86,22 @@ func ExtractAll(cal *icsparse.CalendarInfo, outDir string, download bool, maxByt
 	}
 
 	var firstErr error
+	saved := 0
+	limitHit := false
+	var limitErr error
+	atLimit := func() bool {
+		if maxFiles > 0 && saved >= maxFiles {
+			if !limitHit {
+				limitHit = true
+				err := fmt.Errorf("%w: %d attachments processed, remaining attachments not saved", errAttachmentLimit, maxFiles)
+				limitErr = err
+				noteAttachmentError("attachments", err)
+				firstErr = pickFirstError(firstErr, err)
+			}
+			return true
+		}
+		return false
+	}
 
 	for i := range cal.Events {
 		ev := &cal.Events[i]
@@ -86,6 +112,10 @@ func ExtractAll(cal *icsparse.CalendarInfo, outDir string, download bool, maxByt
 
 			switch a.Source {
 			case "inline":
+				if atLimit() {
+					continue
+				}
+				saved++ // attempts count: failures cost work too
 				path, size, md5sum, sha, mt, err := saveInline(a.Value, attDir, base, a.Fmt, maxBytes)
 				if err != nil {
 					noteAttachmentError(base, err)
@@ -104,6 +134,10 @@ func ExtractAll(cal *icsparse.CalendarInfo, outDir string, download bool, maxByt
 					continue
 				}
 				if strings.HasPrefix(a.Value, "http://") || strings.HasPrefix(a.Value, "https://") {
+					if atLimit() {
+						continue
+					}
+					saved++ // a failed download is still a request made
 					path, size, md5sum, sha, mt, err := downloadURL(a.Value, attDir, base, a.Fmt, maxBytes)
 					if err != nil {
 						noteAttachmentError(a.Value, err)
@@ -125,6 +159,10 @@ func ExtractAll(cal *icsparse.CalendarInfo, outDir string, download bool, maxByt
 		}
 	}
 
+	if limitErr != nil && !errors.Is(firstErr, errAttachmentLimit) {
+		// The limit must stay visible even behind an earlier failure.
+		return errors.Join(firstErr, limitErr)
+	}
 	return firstErr
 }
 

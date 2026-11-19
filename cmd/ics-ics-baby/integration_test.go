@@ -2,13 +2,19 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"image"
 	_ "image/png"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+
+	"ics-ics-baby/internal/render"
 )
 
 // TestICSProcessingIntegration tests end-to-end ICS file processing
@@ -330,4 +336,426 @@ func loadPNG(path string) (image.Image, error) {
 
 	img, _, err := image.Decode(f)
 	return img, err
+}
+
+const fixtureDir = "../../ics-parser-test-suite/ics_files/"
+
+func requireChromiumCLI(t *testing.T) {
+	t.Helper()
+	if _, err := render.FindChromium(""); err != nil {
+		t.Skipf("headless Chromium not available: %v", err)
+	}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func TestCLIChromiumEngine(t *testing.T) {
+	requireChromiumCLI(t)
+	fx := fixtureDir + "11-html-alt-desc.ics"
+	chromeOut := filepath.Join(t.TempDir(), "c")
+	res := runCLI(t, "--out", chromeOut, "--screenshot-engine", "chromium", fx)
+	if res.exit != 0 {
+		t.Fatalf("exit %d, stderr: %s", res.exit, res.stderr)
+	}
+	goOut := filepath.Join(t.TempDir(), "g")
+	if r := runCLI(t, "--out", goOut, fx); r.exit != 0 {
+		t.Fatalf("go engine exit %d", r.exit)
+	}
+	cpng := filepath.Join(chromeOut, "ics-ics-baby-preview.png")
+	if _, err := loadPNG(cpng); err != nil {
+		t.Fatalf("chromium PNG does not decode: %v", err)
+	}
+	a, _ := os.ReadFile(cpng)
+	b, _ := os.ReadFile(filepath.Join(goOut, "ics-ics-baby-preview.png"))
+	if string(a) == string(b) {
+		t.Fatal("chromium PNG identical to go PNG; chromium engine not used")
+	}
+}
+
+func TestCLIChromiumMissing(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "o")
+	res := runCLI(t, "--out", out, "--screenshot-engine", "chromium", "--chromium-bin", "/nonexistent", fixtureDir+"11-html-alt-desc.ics")
+	if res.exit != 1 {
+		t.Fatalf("exit = %d, want 1 (stderr %q)", res.exit, res.stderr)
+	}
+	if !strings.Contains(res.stderr, "chromium render error") {
+		t.Fatalf("stderr %q lacks 'chromium render error'", res.stderr)
+	}
+	for _, f := range []string{"ics-ics-baby-manifest.json", "ics-ics-baby-preview.html"} {
+		if !fileExists(filepath.Join(out, f)) {
+			t.Fatalf("%s missing after chromium failure", f)
+		}
+	}
+}
+
+func readSidecar(t *testing.T, dir string) map[string]any {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, "ics-ics-baby-owa.json"))
+	if err != nil {
+		t.Fatalf("read sidecar: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("sidecar json: %v", err)
+	}
+	return m
+}
+
+func TestCLIInviteViewOK(t *testing.T) {
+	requireChromiumCLI(t)
+	out := filepath.Join(t.TempDir(), "o")
+	res := runCLI(t, "--out", out, "--invite-view", "owa", fixtureDir+"11-html-alt-desc.ics")
+	if res.exit != 0 {
+		t.Fatalf("exit %d: %s", res.exit, res.stderr)
+	}
+	for _, f := range []string{"ics-ics-baby-preview.png", "ics-ics-baby-owa.html", "ics-ics-baby-owa.json", "ics-ics-baby-owa.png"} {
+		if !fileExists(filepath.Join(out, f)) {
+			t.Fatalf("%s missing", f)
+		}
+	}
+	if _, err := loadPNG(filepath.Join(out, "ics-ics-baby-owa.png")); err != nil {
+		t.Fatalf("owa png: %v", err)
+	}
+	sc := readSidecar(t, out)
+	if sc["status"] != "ok" || sc["profile"] != "owa" || sc["emulation"] != true {
+		t.Fatalf("sidecar %v", sc)
+	}
+	for _, line := range []string{"Wrote OWA view:", "Wrote OWA sidecar:", "Wrote OWA PNG:"} {
+		if !strings.Contains(res.stdout, line) {
+			t.Fatalf("stdout lacks %q: %s", line, res.stdout)
+		}
+	}
+}
+
+func TestCLIInviteViewSkipped(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "o")
+	res := runCLI(t, "--out", out, "--invite-view", "owa", fixtureDir+"20-reply-spoof.ics")
+	if res.exit != 0 {
+		t.Fatalf("exit %d: %s", res.exit, res.stderr)
+	}
+	if sc := readSidecar(t, out); sc["status"] != "skipped" {
+		t.Fatalf("sidecar %v", sc)
+	}
+	if fileExists(filepath.Join(out, "ics-ics-baby-owa.png")) {
+		t.Fatal("OWA PNG written for skipped view")
+	}
+}
+
+func TestCLIInviteViewUnknown(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "o")
+	res := runCLI(t, "--out", out, "--invite-view", "gmail", fixtureDir+"11-html-alt-desc.ics")
+	if res.exit != 1 || !strings.Contains(res.stderr, "unknown invite view") {
+		t.Fatalf("exit %d stderr %q", res.exit, res.stderr)
+	}
+}
+
+func TestCLIInviteViewChromiumMissing(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "o")
+	res := runCLI(t, "--out", out, "--invite-view", "owa", "--chromium-bin", "/nonexistent", fixtureDir+"11-html-alt-desc.ics")
+	if res.exit != 1 {
+		t.Fatalf("exit = %d, want 1", res.exit)
+	}
+	for _, f := range []string{"ics-ics-baby-preview.png", "ics-ics-baby-owa.html", "ics-ics-baby-owa.json"} {
+		if !fileExists(filepath.Join(out, f)) {
+			t.Fatalf("%s missing", f)
+		}
+	}
+	if fileExists(filepath.Join(out, "ics-ics-baby-owa.png")) {
+		t.Fatal("OWA PNG exists despite failed render")
+	}
+	sc := readSidecar(t, out)
+	if sc["status"] != "render_failed" || sc["error"] == "" || sc["error"] == nil {
+		t.Fatalf("sidecar %v", sc)
+	}
+}
+
+func TestCLIInviteViewNoBeacon(t *testing.T) {
+	requireChromiumCLI(t)
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1) }))
+	defer srv.Close()
+	host := strings.TrimPrefix(srv.URL, "http://")
+	body := `<p>Hi</p><img src="` + srv.URL + `/pixel.gif" width=1 height=1>` +
+		`<div style="background:url(` + srv.URL + `/bg.png)">x</div>` +
+		`<style>p{background:url(` + srv.URL + `/css.png)}</style>` +
+		`<link rel=stylesheet href="` + srv.URL + `/s.css"><script>new Image().src="` + srv.URL + `/js"</script>`
+	esc := strings.NewReplacer(`\`, `\\`, ";", `\;`, ",", `\,`).Replace(body)
+	ics := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:beacon@test\r\n" +
+		"DTSTART:20260218T100000Z\r\nDTEND:20260218T110000Z\r\nSUMMARY:Beacon\r\n" +
+		"ORGANIZER;CN=X:mailto:x@example.test\r\nLOCATION:" + srv.URL + "/loc\r\n" +
+		"X-MICROSOFT-SKYPETEAMSMEETINGURL:" + srv.URL + "/join\r\n" +
+		"X-ALT-DESC;FMTTYPE=text/html:" + esc + "\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	dir := t.TempDir()
+	in := filepath.Join(dir, "beacon.ics")
+	if err := os.WriteFile(in, []byte(ics), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "o")
+	res := runCLI(t, "--out", out, "--screenshot-engine", "chromium", "--invite-view", "owa", in)
+	if res.exit != 0 {
+		t.Fatalf("exit %d: %s", res.exit, res.stderr)
+	}
+	if n := hits.Load(); n != 0 {
+		t.Fatalf("render contacted the beacon server %d times", n)
+	}
+	sc := readSidecar(t, out)
+	b, _ := json.Marshal(sc["remote_refs"])
+	if !strings.Contains(string(b), host) {
+		t.Fatalf("remote_refs do not name %s: %s", host, b)
+	}
+}
+
+func TestCLIInviteViewOrder(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "o")
+	res := runCLI(t, "--out", out, "--screenshot-engine", "chromium", "--chromium-bin", "/nonexistent", "--invite-view", "owa", fixtureDir+"11-html-alt-desc.ics")
+	if res.exit != 1 {
+		t.Fatalf("exit = %d, want 1", res.exit)
+	}
+	for _, f := range []string{"ics-ics-baby-manifest.json", "ics-ics-baby-preview.html", "ics-ics-baby-owa.html", "ics-ics-baby-owa.json"} {
+		if !fileExists(filepath.Join(out, f)) {
+			t.Fatalf("%s missing after preview render failure", f)
+		}
+	}
+	if strings.Contains(res.stdout, "Wrote PNG screenshot:") {
+		t.Fatal("claimed a preview PNG that failed to render")
+	}
+}
+
+func TestCLIFindingsJSON(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "o")
+	res := runCLI(t, "--out", out, "--findings-json", fixtureDir+"09-combo-spoof-urgent.ics")
+	if res.exit != 0 {
+		t.Fatalf("exit %d: %s", res.exit, res.stderr)
+	}
+	b, err := os.ReadFile(filepath.Join(out, "ics-ics-baby-findings.json"))
+	if err != nil {
+		t.Fatalf("findings file: %v", err)
+	}
+	var doc struct {
+		Schema   string           `json:"schema_version"`
+		SHA      string           `json:"input_sha256"`
+		Findings []map[string]any `json:"findings"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Schema != "ics-ics-baby-findings/1" || len(doc.SHA) != 64 || len(doc.Findings) == 0 {
+		t.Fatalf("doc = %+v", doc)
+	}
+	if !strings.Contains(res.stdout, "Wrote findings:") {
+		t.Fatalf("stdout: %s", res.stdout)
+	}
+
+	out2 := filepath.Join(t.TempDir(), "o")
+	if r := runCLI(t, "--out", out2, fixtureDir+"09-combo-spoof-urgent.ics"); r.exit != 0 {
+		t.Fatalf("exit %d", r.exit)
+	}
+	if fileExists(filepath.Join(out2, "ics-ics-baby-findings.json")) {
+		t.Fatal("findings written without --findings-json")
+	}
+}
+
+// Review finding 6: a skipped rerun into the same --out must not leave the
+// previous run's OWA PNG or inline images next to a "skipped" sidecar.
+func TestCLIInviteViewNoStaleOutputs(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "o")
+	if err := os.MkdirAll(filepath.Join(out, "ics-ics-baby-inline"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"ics-ics-baby-owa.png", "ics-ics-baby-inline/old.png", "ics-ics-baby-owa-chrome.html"} {
+		if err := os.WriteFile(filepath.Join(out, f), []byte("stale"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res := runCLI(t, "--out", out, "--invite-view", "owa", fixtureDir+"20-reply-spoof.ics")
+	if res.exit != 0 {
+		t.Fatalf("exit %d: %s", res.exit, res.stderr)
+	}
+	for _, f := range []string{"ics-ics-baby-owa.png", "ics-ics-baby-inline", "ics-ics-baby-owa-chrome.html"} {
+		if fileExists(filepath.Join(out, f)) {
+			t.Errorf("stale %s survived a skipped run", f)
+		}
+	}
+}
+
+func TestCLIMaxAttachments(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:a@test\r\nSUMMARY:att\r\n")
+	for i := 0; i < 3; i++ {
+		b.WriteString("ATTACH;FMTTYPE=text/plain;ENCODING=BASE64;VALUE=BINARY:aGVsbG8=\r\n")
+	}
+	b.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
+	dir := t.TempDir()
+	in := filepath.Join(dir, "a.ics")
+	if err := os.WriteFile(in, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "o")
+	res := runCLI(t, "--out", out, "--max-attachments", "2", in)
+	if res.exit != 0 {
+		t.Fatalf("exit %d: %s", res.exit, res.stderr)
+	}
+	ents, _ := os.ReadDir(filepath.Join(out, "ics-ics-baby-attachments"))
+	if len(ents) != 2 || !strings.Contains(res.stderr, "attachment limit reached") {
+		t.Fatalf("files=%d stderr=%q", len(ents), res.stderr)
+	}
+}
+
+// The engine contract (kept with the blastbox engine) checks its detection
+// codes against this list, so the code table stays the single source.
+func TestCLIListFindingCodes(t *testing.T) {
+	res := runCLI(t, "--list-finding-codes")
+	if res.exit != 0 {
+		t.Fatalf("exit %d: %s", res.exit, res.stderr)
+	}
+	var codes map[string]string
+	if err := json.Unmarshal([]byte(res.stdout), &codes); err != nil {
+		t.Fatalf("stdout not JSON: %v: %s", err, res.stdout)
+	}
+	if codes["teams_url_hijack"] != "high" || codes["display_alarm"] != "info" || len(codes) < 40 {
+		t.Fatalf("codes = %v", codes)
+	}
+}
+
+// A requested findings file that cannot be written is a failed run, not a
+// silent success with missing (or a previous run's) detections.
+func TestCLIFindingsJSONWriteFailure(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "o")
+	if err := os.MkdirAll(filepath.Join(out, "ics-ics-baby-findings.json", "blocker"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res := runCLI(t, "--out", out, "--findings-json", fixtureDir+"09-combo-spoof-urgent.ics")
+	if res.exit != 1 || !strings.Contains(res.stderr, "failed to write findings") {
+		t.Fatalf("exit %d stderr %q", res.exit, res.stderr)
+	}
+	if strings.Contains(res.stdout, "Wrote findings:") {
+		t.Fatalf("stdout claims findings were written: %s", res.stdout)
+	}
+}
+
+// A view taller than --chromium-max-height is cut; the sidecar says so.
+func TestCLIInviteViewCaptureTruncated(t *testing.T) {
+	requireChromiumCLI(t)
+	dir := t.TempDir()
+	in := filepath.Join(dir, "tall.ics")
+	ics := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:t@test\r\nSUMMARY:Tall\r\n" +
+		`X-ALT-DESC;FMTTYPE=text/html:<p>See below</p><div style="height:6000px"></div><p>PAY NOW</p>` + "\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	if err := os.WriteFile(in, []byte(ics), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "o")
+	res := runCLI(t, "--out", out, "--invite-view", "owa", "--chromium-max-height", "2000", in)
+	if res.exit != 0 {
+		t.Fatalf("exit %d: %s", res.exit, res.stderr)
+	}
+	sc := readSidecar(t, out)
+	dropped, _ := sc["dropped"].([]any)
+	found := false
+	for _, d := range dropped {
+		found = found || d == "capture_truncated"
+	}
+	if !found {
+		t.Fatalf("sidecar dropped = %v, want capture_truncated", sc["dropped"])
+	}
+}
+
+// The blastbox engine's argv on a calendar holding only a VTODO: the run
+// succeeds (preview HTML written, chromium PNG rendered, OWA view skipped).
+func TestCLIVTodoEngineArgv(t *testing.T) {
+	requireChromiumCLI(t)
+	dir := t.TempDir()
+	in := filepath.Join(dir, "todo.ics")
+	ics := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//EN\r\nBEGIN:VTODO\r\nUID:t1@test\r\nSUMMARY:Do the thing\r\nDUE:20261120T100000Z\r\nEND:VTODO\r\nEND:VCALENDAR\r\n"
+	if err := os.WriteFile(in, []byte(ics), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "o")
+	res := runCLI(t, "--out", out, "--screenshot-engine", "chromium", "--invite-view", "owa", "--findings-json", "--max-attachments", "10", in)
+	if res.exit != 0 {
+		t.Fatalf("exit %d: %s", res.exit, res.stderr)
+	}
+	for _, f := range []string{"ics-ics-baby-preview.html", "ics-ics-baby-preview.png", "ics-ics-baby-owa.json", "ics-ics-baby-findings.json"} {
+		if !fileExists(filepath.Join(out, f)) {
+			t.Fatalf("%s missing: %s", f, res.stderr)
+		}
+	}
+	if sc := readSidecar(t, out); sc["status"] != "skipped" {
+		t.Fatalf("sidecar %v", sc)
+	}
+}
+
+// A body too costly to paint (blurred text shadows) still leaves a PNG of
+// the trusted chrome: the page is re-rendered without its body.
+func TestCLIInviteViewBodyRenderFallback(t *testing.T) {
+	requireChromiumCLI(t)
+	var sh []string
+	for i := 0; i < 100; i++ {
+		sh = append(sh, fmt.Sprintf("0 0 %dpx #%06x", 40+i, (i*2654435761)&0xffffff))
+	}
+	var words []string
+	for i := 0; i < 100; i++ {
+		words = append(words, fmt.Sprintf("lorem%d", i))
+	}
+	body := `<p style="font-size:100px;text-shadow:` + strings.Join(sh, ",") + `">` + strings.Join(words, " ") + `</p>`
+	body = strings.NewReplacer(`\`, `\\`, ";", `\;`, ",", `\,`).Replace(body)
+	dir := t.TempDir()
+	in := filepath.Join(dir, "ts.ics")
+	ics := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:1\r\nDTSTART:20261120T150000Z\r\nSUMMARY:Sync\r\nX-ALT-DESC;FMTTYPE=text/html:" + body + "\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	if err := os.WriteFile(in, []byte(ics), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "o")
+	res := runCLI(t, "--out", out, "--invite-view", "owa", "--chromium-timeout", "3s", in)
+	sc := readSidecar(t, out)
+	dropped, _ := sc["dropped"].([]any)
+	found := false
+	for _, d := range dropped {
+		found = found || d == "body_render_failed"
+	}
+	if res.exit != 0 || sc["status"] != "ok" || !found || !fileExists(filepath.Join(out, "ics-ics-baby-owa.png")) {
+		t.Fatalf("exit %d sidecar %v stderr %s", res.exit, sc, res.stderr)
+	}
+}
+
+// When building the view runs out of budget, the trusted chrome is still
+// captured (its build sanitizes nothing).
+func TestCLIInviteViewBudgetFallback(t *testing.T) {
+	requireChromiumCLI(t)
+	out := filepath.Join(t.TempDir(), "o")
+	res := runCLI(t, "--out", out, "--invite-view", "owa", "--owa-build-timeout", "1ns", fixtureDir+"11-html-alt-desc.ics")
+	sc := readSidecar(t, out)
+	dropped := fmt.Sprint(sc["dropped"])
+	if res.exit != 0 || sc["status"] != "ok" || !strings.Contains(dropped, "build_budget_exceeded") ||
+		!strings.Contains(dropped, "body_render_failed") || !fileExists(filepath.Join(out, "ics-ics-baby-owa.png")) {
+		t.Fatalf("exit %d sidecar %v stderr %s", res.exit, sc, res.stderr)
+	}
+}
+
+// A skipped view stays skipped (no PNG) when the build budget runs out.
+func TestCLIInviteViewBudgetSkipped(t *testing.T) {
+	requireChromiumCLI(t)
+	out := filepath.Join(t.TempDir(), "o")
+	res := runCLI(t, "--out", out, "--invite-view", "owa", "--owa-build-timeout", "1ns", fixtureDir+"20-reply-spoof.ics")
+	sc := readSidecar(t, out)
+	if res.exit != 0 || sc["status"] != "skipped" || fileExists(filepath.Join(out, "ics-ics-baby-owa.png")) {
+		t.Fatalf("exit %d sidecar %v png %v", res.exit, sc, fileExists(filepath.Join(out, "ics-ics-baby-owa.png")))
+	}
+	if b, _ := os.ReadFile(filepath.Join(out, "ics-ics-baby-owa.html")); !strings.Contains(string(b), "No meeting view") {
+		t.Fatal("skipped page not written")
+	}
+}
+
+// The budget fallback's note does not send the analyst to artifacts that
+// lack the body; a failed fallback render is reported.
+func TestCLIInviteViewBudgetFallbackNotes(t *testing.T) {
+	requireChromiumCLI(t)
+	out := filepath.Join(t.TempDir(), "o")
+	res := runCLI(t, "--out", out, "--invite-view", "owa", "--owa-build-timeout", "1ns", "--chromium-bin", "/bin/false", fixtureDir+"11-html-alt-desc.ics")
+	sc := readSidecar(t, out)
+	if res.exit != 1 || !strings.Contains(fmt.Sprint(sc["error"]), "without the body failed") || !strings.Contains(res.stderr, "(without body)") {
+		t.Fatalf("exit %d sidecar %v stderr %s", res.exit, sc, res.stderr)
+	}
 }

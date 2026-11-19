@@ -138,3 +138,38 @@ func assertContains(t *testing.T, got, want string) {
 }
 
 func timePtr(t time.Time) *time.Time { return &t }
+
+// A calendar with VTODO, VJOURNAL or VAVAILABILITY components must render;
+// the shared template referenced .Conferences, which those types lack.
+func TestWriteInviteHTMLNonEventComponents(t *testing.T) {
+	for _, f := range []string{"../icsparse/testdata/todos-freebusy.ics"} {
+		cal, err := icsparse.ParseICSFile(f, "", 1<<20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cal.Todos) == 0 {
+			t.Fatalf("%s: no todos parsed", f)
+		}
+		out := filepath.Join(t.TempDir(), "preview.html")
+		if err := WriteInviteHTML(cal, out, "light", true); err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+	}
+	for name, ics := range map[string]string{
+		"todo":         "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:t@test\r\nSUMMARY:Do it\r\nEND:VTODO\r\nEND:VCALENDAR\r\n",
+		"journal":      "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VJOURNAL\r\nUID:j@test\r\nSUMMARY:Note\r\nEND:VJOURNAL\r\nEND:VCALENDAR\r\n",
+		"availability": "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VAVAILABILITY\r\nUID:a@test\r\nSUMMARY:Office\r\nEND:VAVAILABILITY\r\nEND:VCALENDAR\r\n",
+	} {
+		p := filepath.Join(t.TempDir(), "in.ics")
+		if err := os.WriteFile(p, []byte(ics), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cal, err := icsparse.ParseICSFile(p, "", 1<<20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := WriteInviteHTML(cal, filepath.Join(t.TempDir(), "preview.html"), "light", true); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+}

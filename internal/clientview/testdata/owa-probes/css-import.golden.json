@@ -1,0 +1,13 @@
+{
+  "remote_refs": [
+    {
+      "kind": "remote",
+      "value": "http://evil.test/i.css",
+      "host": "evil.test"
+    }
+  ],
+  "links": null,
+  "dropped": [
+    "css:@import"
+  ]
+}
