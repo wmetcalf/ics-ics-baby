@@ -480,9 +480,7 @@ func (s *sanitizer) tokenEvidence(raw string) {
 				cssRefs(val)
 			case key == "href" && (tag == "a" || tag == "area"):
 				host := ""
-				if u, err := url.Parse(val); err == nil {
-					host = u.Host
-				}
+				host = urlHost(val)
 				s.addLink(Link{Href: val, Host: host})
 			case key == "href" || key == "xlink:href" || resourceAttrs[key]:
 				s.addRef(s.classify(val)) // data: -> inline_data (media type)
@@ -1229,6 +1227,24 @@ func gifSize(d []byte) (w, h int, ok bool) {
 	return w, h, w > 0 && h > 0
 }
 
+// urlHost is the host a browser resolves for v: Go treats "https:host/x"
+// (and "https:\\host") as opaque, WHATWG parsing as https://host/x.
+func urlHost(v string) string {
+	u, err := url.Parse(v)
+	if err != nil {
+		return ""
+	}
+	if u.Host == "" && u.Opaque != "" {
+		switch strings.ToLower(u.Scheme) {
+		case "http", "https", "ftp", "ws", "wss":
+			if u2, err := url.Parse(u.Scheme + "://" + strings.TrimLeft(strings.ReplaceAll(u.Opaque, `\`, "/"), "/")); err == nil {
+				return u2.Host
+			}
+		}
+	}
+	return u.Host
+}
+
 // displayHost is a host as the browser navigates to it: a label showing
 // the Unicode form would paint a homograph (Cyrillic о) as the real name.
 func displayHost(h string) string {
@@ -1475,9 +1491,7 @@ func (s *sanitizer) href(n *html.Node, tag string, a *html.Attribute) bool {
 		return true
 	}
 	host := ""
-	if u, err := url.Parse(v); err == nil {
-		host = u.Host
-	}
+	host = urlHost(v)
 	if host == "" && strings.HasPrefix(v, `\\`) {
 		host = s.classify(v).Host // UNC path
 	}
@@ -1491,7 +1505,7 @@ func (s *sanitizer) href(n *html.Node, tag string, a *html.Attribute) bool {
 		// attacker's text around it cannot reorder the label.
 		span := &html.Node{Type: html.ElementNode, Data: "bdi", DataAtom: atom.Bdi,
 			Attr: []html.Attribute{{Key: "class", Val: "owa-host"}}}
-		span.AppendChild(&html.Node{Type: html.TextNode, Data: "(" + label + ")"})
+		span.AppendChild(&html.Node{Type: html.TextNode, Data: "(" + bidiControls.Replace(label) + ")"})
 		if n.Parent != nil && !inForeign(n) {
 			s.generated[span] = true
 			n.Parent.InsertBefore(span, n.NextSibling)
@@ -1553,9 +1567,7 @@ func (s *sanitizer) classify(raw string) RemoteRef {
 		return RemoteRef{Kind: "local", Value: v}
 	default:
 		host := ""
-		if u, err := url.Parse(v); err == nil {
-			host = u.Host
-		}
+		host = urlHost(v)
 		return RemoteRef{Kind: "remote", Value: v, Host: host}
 	}
 }
@@ -2145,7 +2157,8 @@ func placeholder(orig *html.Node, label string) *html.Node {
 	}
 	span := &html.Node{Type: html.ElementNode, Data: "span", DataAtom: atom.Span,
 		Attr: []html.Attribute{{Key: "class", Val: "owa-remote-ref"}, {Key: "style", Val: style}}}
-	span.AppendChild(&html.Node{Type: html.TextNode, Data: label})
+	// (a label is attacker text: no bidi controls in it)
+	span.AppendChild(&html.Node{Type: html.TextNode, Data: bidiControls.Replace(label)})
 	return span
 }
 
@@ -2169,7 +2182,7 @@ func refLabel(r RemoteRef) string {
 		return "local reference: " + clip(r.Value, maxLabel)
 	default:
 		if r.Host != "" {
-			return "remote image: " + clip(r.Host, maxLabel)
+			return "remote image: " + clip(displayHost(r.Host), maxLabel)
 		}
 		return "remote image: " + clip(r.Value, maxLabel)
 	}

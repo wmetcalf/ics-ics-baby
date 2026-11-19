@@ -1087,3 +1087,18 @@ func TestHostLabelIsolated(t *testing.T) {
 		t.Fatalf("%s", res.HTML)
 	}
 }
+
+// Placeholders and labels show hosts as the browser fetches them, without
+// bidi controls; 'https:host' URLs (WHATWG: https://host) get their host.
+func TestPlaceholderHostsNeutralized(t *testing.T) {
+	res, err := OWASanitize("<img src=\"https://teams.micrоsoft.com/a.png\"> <img src=\"https://‮moc.tfosorcim.nigol‬/b.png\"> <a href=\"https:evil.example/login\">x</a>", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.HTML, "remote image: teams.xn--micrsoft-") || strings.Contains(res.HTML, "‮") {
+		t.Fatalf("%s", res.HTML)
+	}
+	if len(res.Links) != 1 || res.Links[0].Host != "evil.example" {
+		t.Fatalf("links %+v", res.Links)
+	}
+}

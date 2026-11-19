@@ -1800,12 +1800,12 @@ func unescapeICSText(s string) string {
 	return s
 }
 
-// unescapeICSTextExact decodes RFC 5545 TEXT escapes in a single left-to-right
-// pass, so an escaped backslash followed by "n" stays a literal backslash + n.
-// (unescapeICSText is left as-is: changing it would alter default outputs.)
 // maxAltDescHTMLParts bounds the HTML X-ALT-DESC parts kept per event.
 const maxAltDescHTMLParts = 64
 
+// unescapeICSTextExact decodes RFC 5545 TEXT escapes in a single left-to-right
+// pass, so an escaped backslash followed by "n" stays a literal backslash + n.
+// (unescapeICSText is left as-is: changing it would alter default outputs.)
 func unescapeICSTextExact(s string) string {
 	if !strings.Contains(s, "\\") {
 		return s

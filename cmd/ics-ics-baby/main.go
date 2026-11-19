@@ -469,6 +469,8 @@ func writeOWAView(cal *icsparse.CalendarInfo, inputSHA, outDir string, width int
 				_ = os.RemoveAll(filepath.Join(outDir, clientview.InlineDirName))
 			} else {
 				_ = os.Remove(pngPath)
+				// No sidecar lists the abandoned build's inline images.
+				_ = os.RemoveAll(filepath.Join(outDir, clientview.InlineDirName))
 				sc.Error += "; rendering without the body failed too: " + ferr.Error()
 				fmt.Fprintf(os.Stderr, "owa chromium render error (without body): %v\n", ferr)
 			}
