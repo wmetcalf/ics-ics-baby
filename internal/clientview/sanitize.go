@@ -12,6 +12,7 @@ import (
 	_ "image/gif" // DecodeConfig for inline images
 	_ "image/jpeg"
 	_ "image/png"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -445,6 +446,15 @@ var parseFragment = html.ParseFragment
 func (s *sanitizer) tokenEvidence(raw string) {
 	z := html.NewTokenizer(strings.NewReader(raw))
 	cssRefs := func(css string) {
+		if l := strings.ToLower(css); strings.Contains(l, "@import") || strings.Contains(l, "image-set(") || strings.Contains(l, "src(") {
+			for _, m := range cssQuoted.FindAllStringSubmatch(css, -1) {
+				if u := strings.TrimSpace(firstNonEmpty(m[1], m[2])); strings.Contains(u, ":") || strings.HasPrefix(u, "//") {
+					if !strings.HasPrefix(strings.ToLower(u), "data:") && !scriptScheme(u) {
+						s.addRef(s.classify(u))
+					}
+				}
+			}
+		}
 		for _, m := range cssURL.FindAllStringSubmatch(css, -1) {
 			if u := strings.TrimSpace(firstNonEmpty(m[1], m[2], m[3])); u != "" && !strings.HasPrefix(u, "#") &&
 				!strings.HasPrefix(strings.ToLower(u), "data:") && !scriptScheme(u) {
@@ -1258,6 +1268,9 @@ func displayHost(h string) string {
 	if ascii {
 		return h
 	}
+	if name, port, err := net.SplitHostPort(h); err == nil {
+		return net.JoinHostPort(displayHost(name), port)
+	}
 	if a, err := idna.Lookup.ToASCII(h); err == nil {
 		return a
 	}
@@ -1510,6 +1523,12 @@ func (s *sanitizer) href(n *html.Node, tag string, a *html.Attribute) bool {
 			s.generated[span] = true
 			n.Parent.InsertBefore(span, n.NextSibling)
 		}
+	}
+	if inForeign(n) {
+		// No label can go inside <svg>/<math>: a live link there would
+		// not disclose its host, so it is made inert (and recorded).
+		s.drop("attr:href:foreign")
+		return false
 	}
 	if !linkSchemesKept[scheme] {
 		s.drop("attr:href:inert")

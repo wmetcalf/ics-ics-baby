@@ -218,7 +218,7 @@ func writeOWAGuarded(cal *icsparse.CalendarInfo, inputSHA256, outDir string, g *
 				sc.Dropped = append(sc.Dropped, "other_events_capped")
 				break
 			}
-			sc.OtherEvents = append(sc.OtherEvents, cal.Events[i].Summary)
+			sc.OtherEvents = append(sc.OtherEvents, clipEvidence(cal.Events[i].Summary))
 			if g != nil && g.chromeOnly {
 				continue // the page only lists them; evidence is the first build's
 			}
@@ -239,7 +239,7 @@ func writeOWAGuarded(cal *icsparse.CalendarInfo, inputSHA256, outDir string, g *
 	}
 
 	if ev.UID != nil {
-		sc.EventUID = *ev.UID
+		sc.EventUID = clipEvidence(*ev.UID)
 	}
 	view.OtherEvents = sc.OtherEvents
 
@@ -278,7 +278,7 @@ func writeOWAGuarded(cal *icsparse.CalendarInfo, inputSHA256, outDir string, g *
 	}
 
 	raw, active := JoinURL(ev)
-	sc.JoinURL = raw
+	sc.JoinURL = clipEvidence(raw)
 	view.JoinRaw = raw
 	view.JoinActive = active
 	if active {
@@ -522,11 +522,12 @@ func failView(sc Sidecar, outDir string, g *buildGuard, cause error) (Sidecar, e
 // eventEvidence sanitizes an unrendered event's HTML body for its references
 // (writing its inline images like the rendered event's) and its join URL.
 func eventEvidence(ev *icsparse.EventInfo, outDir string) (EventEvidence, error) {
-	d := EventEvidence{Summary: ev.Summary, RemoteRefs: []RemoteRef{}, Links: []Link{}, Dropped: []string{}}
+	d := EventEvidence{Summary: clipEvidence(ev.Summary), RemoteRefs: []RemoteRef{}, Links: []Link{}, Dropped: []string{}}
 	if ev.UID != nil {
-		d.EventUID = *ev.UID
+		d.EventUID = clipEvidence(*ev.UID)
 	}
 	d.JoinURL, _ = JoinURL(ev)
+	d.JoinURL = clipEvidence(d.JoinURL)
 	if res, err := sanitizeParts(ev, outDir); err != nil {
 		return d, err
 	} else if res != nil {

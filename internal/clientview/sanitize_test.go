@@ -1102,3 +1102,28 @@ func TestPlaceholderHostsNeutralized(t *testing.T) {
 		t.Fatalf("links %+v", res.Links)
 	}
 }
+
+func TestSanitizeFinalRound(t *testing.T) {
+	// An SVG anchor cannot carry its host label, so it is inert (recorded).
+	res, err := OWASanitize(`<svg><a href="https://evil.example/x"><text>Sign in</text></a></svg>`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.HTML, "evil.example") || len(res.Links) != 1 {
+		t.Fatalf("%s / %+v", res.HTML, res.Links)
+	}
+	// Ports do not defeat the ASCII host label.
+	if got := displayHost("teams.micrоsoft.com:8443"); !strings.HasPrefix(got, "teams.xn--") || !strings.HasSuffix(got, ":8443") {
+		t.Fatalf("displayHost = %q", got)
+	}
+	// Token evidence reads quoted @import and image-set strings.
+	s := newSanitizer("")
+	s.tokenEvidence(`<style>@import "https://imp.example/a.css"; p{background:image-set("https://set.example/b.png" 1x)}</style>`)
+	hosts := map[string]bool{}
+	for _, r := range s.refs {
+		hosts[r.Host] = true
+	}
+	if !hosts["imp.example"] || !hosts["set.example"] {
+		t.Fatalf("refs %+v", s.refs)
+	}
+}
