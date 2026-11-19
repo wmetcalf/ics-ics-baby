@@ -1478,6 +1478,18 @@ func (s *sanitizer) attrURLs(v string) bool {
 	return external
 }
 
+// hostLabelStyle pins how a generated host label looks. Body CSS lives in the
+// same document, so a rule such as bdi{display:none} could hide the real link
+// target while the link text stays visible. Inline !important declarations win
+// over every rule of the page (element-attached styles beat any selector), and
+// all:initial cuts what the label would inherit from the attacker's markup;
+// direction and unicode-bidi, which all leaves alone, are set explicitly. The
+// stacking keeps ordinary body content from painting over it.
+const hostLabelStyle = "all:initial!important;display:inline!important;unicode-bidi:isolate!important;" +
+	"direction:ltr!important;position:relative!important;z-index:2147483647!important;" +
+	"visibility:visible!important;opacity:1!important;color:#616161!important;background:#ffffff!important;" +
+	"font:12px/1.4 Segoe UI,Arial,sans-serif!important;margin-left:4px!important;white-space:normal!important"
+
 // href handles a link target. It returns false when the attribute is removed.
 func (s *sanitizer) href(n *html.Node, tag string, a *html.Attribute) bool {
 	v := strings.TrimSpace(a.Val)
@@ -1517,7 +1529,7 @@ func (s *sanitizer) href(n *html.Node, tag string, a *html.Attribute) bool {
 		// <bdi>: a bidi isolate, so an unterminated override in the
 		// attacker's text around it cannot reorder the label.
 		span := &html.Node{Type: html.ElementNode, Data: "bdi", DataAtom: atom.Bdi,
-			Attr: []html.Attribute{{Key: "class", Val: "owa-host"}}}
+			Attr: []html.Attribute{{Key: "class", Val: "owa-host"}, {Key: "style", Val: hostLabelStyle}}}
 		span.AppendChild(&html.Node{Type: html.TextNode, Data: "(" + bidiControls.Replace(label) + ")"})
 		if n.Parent != nil && !inForeign(n) {
 			s.generated[span] = true

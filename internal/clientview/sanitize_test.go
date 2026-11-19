@@ -1083,7 +1083,7 @@ func TestHostLabelIsolated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(res.HTML, `<bdi class="owa-host">(moc.tfosorcim.ai)</bdi>`) {
+	if !strings.Contains(res.HTML, `<bdi class="owa-host" style="`+hostLabelStyle+`">(moc.tfosorcim.ai)</bdi>`) {
 		t.Fatalf("%s", res.HTML)
 	}
 }
